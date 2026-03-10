@@ -17,14 +17,19 @@ pub mod trace;
 
 #[derive(Error, Debug)]
 pub enum Error {
-    #[error("Internal error: {0}")]
-    Internal(Cow<'static, str>),
+    #[error("Code missing: {0:?}")]
+    MissingCode(Acc),
+    #[error("Call result missing")]
+    CallResultMissing,
     #[error("Generic error: {0}")]
     Generic(#[from] eyre::Report),
+    #[error("Internal error: {0}")]
+    Internal(Cow<'static, str>),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
 
+#[derive(Clone, Debug)]
 pub struct Call {
     pub by: Acc,
     pub to: Acc,
@@ -34,3 +39,21 @@ pub struct Call {
     pub auth: Vec<Acc>,
     pub nonce: Option<u64>,
 }
+
+// mod x {
+//     use yaevmi_base::{Acc, Int};
+//     use crate::{Call, exe::Executor};
+//     async fn f() {
+//         let call = Call {
+//             by: Acc::zero(),
+//             to: Acc::one(),
+//             gas: 42,
+//             eth: Int::zero(),
+//             data: vec![],
+//             auth: vec![],
+//             nonce: None,
+//         };
+//         let x = Executor::new(call);
+//         x.run(state, chain).await
+//     }
+// }

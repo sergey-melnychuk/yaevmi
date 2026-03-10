@@ -45,8 +45,8 @@ pub trait Chain {
     async fn get(&self, acc: &Acc, key: &Int) -> eyre::Result<Int>;
     async fn acc(&self, acc: &Acc) -> eyre::Result<Account>;
     async fn code(&self, acc: &Acc) -> eyre::Result<(Vec<u8>, Int)>;
-    async fn nonce(&self, acc: &Acc) -> Option<u64>;
-    async fn balance(&self, acc: &Acc) -> Option<Int>;
+    async fn nonce(&self, acc: &Acc) -> eyre::Result<u64>;
+    async fn balance(&self, acc: &Acc) -> eyre::Result<Int>;
     async fn head(&self, number: u64) -> eyre::Result<Head>;
     async fn block(&self, number: u64) -> eyre::Result<(Head, Vec<Tx>)>;
 }

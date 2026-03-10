@@ -1,6 +1,7 @@
 use crate::hex::Hex;
 
 pub mod hex;
+pub mod http;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub fn keccak256(data: &[u8]) -> Hex<32> {

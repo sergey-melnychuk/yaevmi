@@ -29,18 +29,20 @@ pub enum CallMode {
     Static,
     Delegate,
     CallCode,
-}
-
-pub enum CreateMode {
     Create,
     Create2,
 }
+
+// pub enum CreateMode {
+//     Create,
+//     Create2,
+// }
 
 pub enum StepResult {
     End,
     Ok { gas_amount: i64, gas_refund: i64 },
     Call(Call, CallMode, Range<usize>),
-    Create(Call, CreateMode),
+    // Create(Call, CreateMode),
     Return(Vec<u8>),
     Revert(Vec<u8>),
     Halt(HaltReason),
