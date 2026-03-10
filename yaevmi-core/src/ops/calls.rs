@@ -1,3 +1,13 @@
+use crate::{
+    Call,
+    evm::{Context, Evm, EvmResult},
+    state::State,
+};
+
+pub fn todo(_evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<(i64, i64)> {
+    Ok((0, 0))
+}
+
 // TODO: 0xF0 CREATE
 // TODO: 0xF1 CALL
 // TODO: 0xF2 CALLCODE

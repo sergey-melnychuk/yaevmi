@@ -1,11 +1,10 @@
 use crate::{
-    Call, Int, Result,
-    evm::{Context, Evm, HaltReason, StepResult},
-    ops::{halt, ok},
+    Call, Int,
+    evm::{Context, Evm, EvmResult, HaltReason},
     state::State,
 };
 
-pub fn push(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> Result<StepResult> {
+pub fn push(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<(i64, i64)> {
     let gas = 3;
     let op = evm.code[evm.pc];
     let len = len(op);
@@ -15,39 +14,37 @@ pub fn push(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> Result<S
         let lo = evm.pc + 1;
         let hi = evm.pc + 1 + len;
         if hi > evm.code.len() {
-            return halt(HaltReason::BadOpcode(op));
+            return Err(HaltReason::BadOpcode(op));
         }
         Int::from(&evm.code[lo..hi])
     };
-    evm.stack.push(int);
-    evm.pc += len + 1;
-    ok(gas)
+    evm.push(int)?;
+    evm.pc += len;
+    Ok((gas, 0))
 }
 
-pub fn dup(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> Result<StepResult> {
+pub fn dup(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<(i64, i64)> {
     let gas = 3;
     let op = evm.code[evm.pc];
     let n = idx(op) - 1;
     let Some(int) = evm.stack.iter().rev().nth(n).copied() else {
-        return halt(HaltReason::StackUnderflow);
+        return Err(HaltReason::StackUnderflow);
     };
-    evm.stack.push(int);
-    evm.pc += 1;
-    ok(gas)
+    evm.push(int)?;
+    Ok((gas, 0))
 }
 
-pub fn swap(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> Result<StepResult> {
+pub fn swap(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<(i64, i64)> {
     let gas = 3;
     let op = evm.code[evm.pc];
     let n = idx(op); // SWAP{k}: swap top with (k+1)th, distance = k = idx(op)
     if evm.stack.len() <= n {
-        return halt(HaltReason::StackUnderflow);
+        return Err(HaltReason::StackUnderflow);
     }
     let i = evm.stack.len() - 1;
     let j = i - n;
     evm.stack.swap(i, j);
-    evm.pc += 1;
-    ok(gas)
+    Ok((gas, 0))
 }
 
 pub fn len(op: u8) -> usize {
@@ -71,17 +68,17 @@ mod tests {
     use super::*;
     use crate::{
         Int,
-        evm::{Evm, HaltReason, StepResult},
+        evm::{Evm, HaltReason},
     };
 
     fn int(val: u64) -> Int {
         Int::from(val.to_be_bytes().as_slice())
     }
 
-    fn is_halt(result: crate::Result<StepResult>, expected: HaltReason) -> bool {
-        match (result.unwrap(), expected) {
-            (StepResult::Halt(HaltReason::StackUnderflow), HaltReason::StackUnderflow) => true,
-            (StepResult::Halt(HaltReason::BadOpcode(a)), HaltReason::BadOpcode(b)) => a == b,
+    fn is_halt(result: EvmResult<(i64, i64)>, expected: HaltReason) -> bool {
+        match (result, expected) {
+            (Err(HaltReason::StackUnderflow), HaltReason::StackUnderflow) => true,
+            (Err(HaltReason::BadOpcode(a)), HaltReason::BadOpcode(b)) => a == b,
             _ => false,
         }
     }
@@ -93,7 +90,7 @@ mod tests {
         let mut evm = Evm::new(vec![0x5F], 1000); // PUSH0
         push(&mut evm, &ctx(), &call(), &mut state()).unwrap();
         assert_eq!(evm.stack, vec![Int::ZERO]);
-        assert_eq!(evm.pc, 1);
+        assert_eq!(evm.pc, 0);
     }
 
     #[test]
@@ -101,7 +98,7 @@ mod tests {
         let mut evm = Evm::new(vec![0x60, 0x42], 1000); // PUSH1 0x42
         push(&mut evm, &ctx(), &call(), &mut state()).unwrap();
         assert_eq!(evm.stack, vec![int(0x42)]);
-        assert_eq!(evm.pc, 2);
+        assert_eq!(evm.pc, 1);
     }
 
     #[test]
@@ -109,7 +106,7 @@ mod tests {
         let mut evm = Evm::new(vec![0x61, 0x01, 0x02], 1000); // PUSH2 0x0102
         push(&mut evm, &ctx(), &call(), &mut state()).unwrap();
         assert_eq!(evm.stack, vec![int(0x0102)]);
-        assert_eq!(evm.pc, 3);
+        assert_eq!(evm.pc, 2);
     }
 
     #[test]
@@ -119,7 +116,7 @@ mod tests {
         let mut evm = Evm::new(code, 1000);
         push(&mut evm, &ctx(), &call(), &mut state()).unwrap();
         assert_eq!(evm.stack.len(), 1);
-        assert_eq!(evm.pc, 33);
+        assert_eq!(evm.pc, 32);
         let expected: Vec<u8> = (1u8..=32).collect();
         assert_eq!(evm.stack[0], Int::from(expected.as_slice()));
     }
@@ -141,7 +138,7 @@ mod tests {
         evm.stack.push(a);
         dup(&mut evm, &ctx(), &call(), &mut state()).unwrap();
         assert_eq!(evm.stack, vec![a, a]);
-        assert_eq!(evm.pc, 1);
+        assert_eq!(evm.pc, 0);
     }
 
     #[test]
@@ -151,7 +148,7 @@ mod tests {
         evm.stack.extend([a, b]);
         dup(&mut evm, &ctx(), &call(), &mut state()).unwrap();
         assert_eq!(evm.stack, vec![a, b, a]); // copies 2nd from top (a)
-        assert_eq!(evm.pc, 1);
+        assert_eq!(evm.pc, 0);
     }
 
     #[test]
@@ -188,7 +185,7 @@ mod tests {
         evm.stack.extend([a, b]);
         swap(&mut evm, &ctx(), &call(), &mut state()).unwrap();
         assert_eq!(evm.stack, vec![b, a]); // top swapped with 2nd
-        assert_eq!(evm.pc, 1);
+        assert_eq!(evm.pc, 0);
     }
 
     #[test]
@@ -198,7 +195,7 @@ mod tests {
         evm.stack.extend([a, b, c]);
         swap(&mut evm, &ctx(), &call(), &mut state()).unwrap();
         assert_eq!(evm.stack, vec![c, b, a]); // top swapped with 3rd
-        assert_eq!(evm.pc, 1);
+        assert_eq!(evm.pc, 0);
     }
 
     #[test]

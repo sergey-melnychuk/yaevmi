@@ -36,6 +36,7 @@ pub trait State {
     fn set_hash(&mut self, number: u64, hash: Int);
 
     fn get_delegation(&mut self, acc: &Acc) -> Option<Acc>;
+    fn log(&mut self, data: Vec<u8>, topics: Vec<Int>);
 }
 
 #[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]

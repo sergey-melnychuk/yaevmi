@@ -1,6 +1,6 @@
 use crate::{
-    Call, Result,
-    evm::{Context, Evm, HaltReason, StepResult},
+    Call,
+    evm::{Context, Evm, EvmResult, HaltReason},
     state::State,
 };
 
@@ -11,61 +11,50 @@ pub mod logs;
 pub mod stack;
 pub mod store;
 
-pub type Handler = fn(&mut Evm, &Context, &Call, &mut dyn State) -> Result<StepResult>;
+pub type Handler = fn(&mut Evm, &Context, &Call, &mut dyn State) -> EvmResult<(i64, i64)>;
 
-pub fn invalid(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> Result<StepResult> {
+pub fn invalid(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<(i64, i64)> {
     let op = evm.code.get(evm.pc).copied().unwrap_or_default();
-    Ok(StepResult::Halt(HaltReason::BadOpcode(op)))
-}
-
-pub fn ok(gas: i64) -> Result<StepResult> {
-    Ok(StepResult::Ok {
-        gas_amount: gas,
-        gas_refund: 0,
-    })
-}
-
-pub fn halt(reason: HaltReason) -> Result<StepResult> {
-    Ok(StepResult::Halt(reason))
+    Err(HaltReason::BadOpcode(op))
 }
 
 pub const OPS: [(&str, Handler); 256] = [
     // 0x00
     ("STOP", basic::stop),
     ("ADD", basic::add),
-    ("MUL", invalid),
-    ("SUB", invalid),
-    ("DIV", invalid),
+    ("MUL", basic::mul),
+    ("SUB", basic::sub),
+    ("DIV", basic::div),
     ("SDIV", invalid),
-    ("MOD", invalid),
+    ("MOD", basic::r#mod),
     ("SMOD", invalid),
-    ("ADDMOD", invalid),
-    ("MULMOD", invalid),
-    ("EXP", invalid),
+    ("ADDMOD", basic::addmod),
+    ("MULMOD", basic::mulmod),
+    ("EXP", basic::exp),
     ("SIGNEXTEND", invalid),
     ("INVALID/0x0C", invalid),
     ("INVALID/0x0D", invalid),
     ("INVALID/0x0E", invalid),
     ("INVALID/0x0F", invalid),
     // 0x10
-    ("LT", invalid),
-    ("GT", invalid),
+    ("LT", basic::lt),
+    ("GT", basic::gt),
     ("SLT", invalid),
     ("SGT", invalid),
-    ("EQ", invalid),
-    ("ISZERO", invalid),
-    ("AND", invalid),
-    ("OR", invalid),
-    ("XOR", invalid),
-    ("NOT", invalid),
-    ("BYTE", invalid),
-    ("SHL", invalid),
-    ("SHR", invalid),
-    ("SAR", invalid),
-    ("INVALID/0x1E", invalid),
+    ("EQ", basic::eq),
+    ("ISZERO", basic::iszero),
+    ("AND", basic::and),
+    ("OR", basic::or),
+    ("XOR", basic::xor),
+    ("NOT", basic::not),
+    ("BYTE", basic::byte),
+    ("SHL", basic::shl),
+    ("SHR", basic::shr),
+    ("SAR", basic::sar),
+    ("CLZ", basic::clz),
     ("INVALID/0x1F", invalid),
     // 0x20
-    ("KECCAK256", invalid),
+    ("KECCAK256", basic::hash),
     ("INVALID/0x21", invalid),
     ("INVALID/0x22", invalid),
     ("INVALID/0x23", invalid),
@@ -116,17 +105,17 @@ pub const OPS: [(&str, Handler); 256] = [
     ("INVALID/0x4E", invalid),
     ("INVALID/0x4F", invalid),
     // 0x50
-    ("POP", invalid),
+    ("POP", store::pop),
     ("MLOAD", invalid),
     ("MSTORE", invalid),
     ("MSTORE8", invalid),
     ("SLOAD", invalid),
     ("SSTORE", invalid),
-    ("JUMP", invalid),
-    ("JUMPI", invalid),
-    ("PC", invalid),
-    ("MSIZE", invalid),
-    ("GAS", invalid),
+    ("JUMP", store::jump),
+    ("JUMPI", store::jumpi),
+    ("PC", store::pc),
+    ("MSIZE", store::msize),
+    ("GAS", store::gas),
     ("JUMPDEST", invalid),
     ("TLOAD", invalid),
     ("TSTORE", invalid),
@@ -201,11 +190,11 @@ pub const OPS: [(&str, Handler); 256] = [
     ("SWAP15", stack::swap),
     ("SWAP16", stack::swap),
     // 0xA0
-    ("LOG0", invalid),
-    ("LOG1", invalid),
-    ("LOG2", invalid),
-    ("LOG3", invalid),
-    ("LOG4", invalid),
+    ("LOG0", logs::log),
+    ("LOG1", logs::log),
+    ("LOG2", logs::log),
+    ("LOG3", logs::log),
+    ("LOG4", logs::log),
     ("INVALID/0xA5", invalid),
     ("INVALID/0xA6", invalid),
     ("INVALID/0xA7", invalid),
@@ -411,6 +400,9 @@ pub mod tests {
         }
         fn get_delegation(&mut self, _: &Acc) -> Option<Acc> {
             None
+        }
+        fn log(&mut self, _: Vec<u8>, _: Vec<Int>) {
+            ()
         }
     }
 }

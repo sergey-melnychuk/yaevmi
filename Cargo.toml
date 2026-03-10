@@ -12,9 +12,14 @@ members = [
 [workspace.dependencies]
 eyre = "0.6"
 thiserror = "2.0"
+hex = "0.4.3"
 serde = "1.0"
 serde_json = "1.0"
 async-trait = "0.1"
+ruint = "1.17"
+ethnum = "1.5"
+keccak-asm = "0.1"
+tiny-keccak = { version = "2", features = ["keccak"] }
 yaevmi-base = { version = "0.1.0", path = "./yaevmi-base" }
 yaevmi-core = { version = "0.1.0", path = "./yaevmi-core" }
 yaevmi-misc = { version = "0.1.0", path = "./yaevmi-misc" }

@@ -29,8 +29,20 @@ impl Executor {
                     CallResult::Call { status, ret, gas } => {
                         this.evm.stack.push(status);
                         if !status.is_zero() && !ret.is_empty() {
-                            // TODO: check for memory/result resizing
-                            this.evm.memory[target].copy_from_slice(&ret);
+                            let mem_exp_cost = match this.evm.mem_put(target, &ret) {
+                                Ok(gas) => gas,
+                                Err(_reason) => {
+                                    target = 0..0;
+                                    result = Some(CallResult::Call {
+                                        status: Int::ZERO,
+                                        ret: vec![],
+                                        gas: this.evm.gas,
+                                    });
+                                    self.callstack.pop();
+                                    continue;
+                                }
+                            };
+                            this.evm.gas.spent += mem_exp_cost;
                         }
                         this.evm.gas.spent += gas.spent;
                         this.evm.gas.refund += gas.refund;
@@ -39,7 +51,7 @@ impl Executor {
                         result = None;
                     }
                     CallResult::Created(acc, gas) => {
-                        this.evm.stack.push(acc.to_int());
+                        this.evm.stack.push(acc.widen());
                         this.evm.gas.spent += gas.spent;
                         this.evm.gas.refund += gas.refund;
                     }
@@ -48,9 +60,12 @@ impl Executor {
             match this.evm.step(&this.ctx, &this.call, state)? {
                 StepResult::End => break,
                 StepResult::Ok {
-                    gas_amount: _,
-                    gas_refund: _,
+                    gas_amount: spent,
+                    gas_refund: refund,
                 } => {
+                    this.evm.gas.spent += spent;
+                    this.evm.gas.refund += refund;
+
                     // TODO: tracing (if enabled): EVM state, gas state, debug info
                     continue;
                 }

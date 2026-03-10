@@ -1,60 +1,55 @@
-#[derive(Copy, Clone, Debug, PartialEq)]
-pub struct Acc([u8; 20]);
-// TODO: serde, into/from hex, as_ref
-// TODO: into(Int)
+pub mod acc;
+pub mod dto;
+pub mod int;
 
-impl Acc {
-    pub const ZERO: Self = Acc([0; 20]);
+pub use acc::*;
+pub use int::*;
 
-    pub fn to_int(&self) -> Int {
-        let mut int = Int::ZERO;
-        int.0[12..].copy_from_slice(&self.0);
-        int
+#[cfg(test)]
+mod tests {
+    use yaevmi_misc::hex::Hex;
+
+    use super::*;
+
+    fn roundtrip<T: for<'a> From<&'a [u8]> + AsRef<[u8]>>(s: &str) -> String {
+        let buf = hex::decode(s).unwrap_or_default();
+        let t = T::from(&buf);
+        hex::encode(t.as_ref())
     }
 
-    pub fn is_zero(&self) -> bool {
-        self.0.iter().all(|byte| byte == &0)
+    fn check<const N: usize>(s: &str) {
+        let actual = roundtrip::<Hex<N>>(s);
+        let expected = s.chars().take(s.len().min(N * 2)).collect::<String>();
+        let zeroes = N * 2 - (N * 2).min(s.len());
+        let zeroes = "0".repeat(zeroes);
+        let expected = format!("{zeroes}{expected}");
+        assert_eq!(actual, expected, "case '{s}'");
     }
-}
 
-#[derive(Copy, Clone, Debug, PartialEq)]
-pub struct Int([u8; 32]);
-// TODO: serde, into/from hex, as_ref
-// TODO: arithmetics: (un)signed/modular/bitwise
-// TODO: arithmetics: overflow/wrapping
-// TODO: from(Acc), as_u64/i64, as_usize/isize
-
-impl Int {
-    pub const ZERO: Self = Int([0; 32]);
-    pub const ONE: Self = Int([
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 1,
-    ]);
-
-    pub fn is_zero(&self) -> bool {
-        self.0.iter().all(|byte| byte == &0)
+    #[test]
+    fn test_int_roundtrip() {
+        for s in [
+            "ff",
+            "deadbeef",
+            "0102030405060708090a",
+            "aabbccddeeff00112233445566778899aabbccdd",
+            "aabbccddeeff00112233445566778899aabbccddee",
+            "aabbccddeeff00112233445566778899aabbccddeeff001122",
+            "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+        ] {
+            check::<{ Int::N }>(s);
+        }
     }
-}
 
-impl From<&[u8]> for Int {
-    fn from(value: &[u8]) -> Self {
-        let mut buffer = [0u8; 32];
-        let skip = 32 - value.len();
-        buffer[skip..].copy_from_slice(value);
-        Self(buffer)
+    #[test]
+    fn test_acc_roundtrip() {
+        for s in [
+            "ff",
+            "deadbeef",
+            "0102030405060708090a",
+            "aabbccddeeff00112233445566778899aabbccdd",
+        ] {
+            check::<{ Acc::N }>(s);
+        }
     }
-}
-
-// TODO: RPC DTOs: block, header, tx
-
-// TODO: tracing DTOs (events, touches, etc)
-
-pub struct Head {
-    pub number: u64,
-    pub hash: Int,
-    // TODO
-}
-
-pub struct Tx {
-    // TODO
 }

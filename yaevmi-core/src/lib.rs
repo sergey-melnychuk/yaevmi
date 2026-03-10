@@ -2,11 +2,15 @@ use std::borrow::Cow;
 
 use thiserror::Error;
 
-pub use yaevmi_base::{Acc, Head, Int, Tx};
+pub use yaevmi_base::{
+    Acc, Int,
+    dto::{Head, Tx},
+};
 
 pub mod evm;
 pub mod exe;
 pub mod ops;
+pub mod pre;
 pub mod rpc;
 pub mod state;
 pub mod trace;

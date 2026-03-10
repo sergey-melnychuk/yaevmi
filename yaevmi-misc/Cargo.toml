@@ -3,4 +3,8 @@ name = "yaevmi-misc"
 version = "0.1.0"
 edition = "2024"
 
-[dependencies]
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+keccak-asm.workspace = true
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+tiny-keccak.workspace = true
