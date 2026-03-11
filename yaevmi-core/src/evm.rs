@@ -1,5 +1,7 @@
 use std::ops::Range;
 
+use yaevmi_base::dto::Head;
+
 use crate::{Acc, Call, Int, Result, ops::OPS, state::State};
 
 const K: usize = 1024;
@@ -15,6 +17,7 @@ pub enum HaltReason {
     StackOverflow,
 }
 
+#[derive(Debug)]
 pub enum Fetch {
     Code(Acc),
     Nonce(Acc),
@@ -24,25 +27,40 @@ pub enum Fetch {
     StateCell(Acc, Int),
 }
 
+#[derive(Debug)]
 pub enum CallMode {
-    Call,
-    Static,
-    Delegate,
-    CallCode,
-    Create,
-    Create2,
+    Call(Range<usize>),
+    Static(Range<usize>),
+    Delegate(Range<usize>),
+    CallCode(Range<usize>),
+    Create(Acc),
+    Create2(Acc),
 }
 
-// pub enum CreateMode {
-//     Create,
-//     Create2,
-// }
+impl CallMode {
+    pub fn range(&self) -> Range<usize> {
+        match self {
+            Self::Call(r) => r.clone(),
+            Self::Static(r) => r.clone(),
+            Self::Delegate(r) => r.clone(),
+            Self::CallCode(r) => r.clone(),
+            _ => 0..0,
+        }
+    }
+
+    pub fn acc(&self) -> Acc {
+        match self {
+            Self::Create(acc) => *acc,
+            Self::Create2(acc) => *acc,
+            _ => Acc::ZERO,
+        }
+    }
+}
 
 pub enum StepResult {
     End,
     Ok { gas_amount: i64, gas_refund: i64 },
-    Call(Call, CallMode, Range<usize>),
-    // Create(Call, CreateMode),
+    Call(Call, CallMode),
     Return(Vec<u8>),
     Revert(Vec<u8>),
     Halt(HaltReason),
@@ -73,12 +91,22 @@ impl Gas {
 }
 
 pub struct Context {
+    pub origin: Acc,
     pub is_static: bool,
     pub depth: usize,
     pub this: Acc,
 }
 
-pub type EvmResult<T> = std::result::Result<T, HaltReason>;
+#[derive(Debug)]
+pub enum EvmYield {
+    Halt(HaltReason),
+    Fetch(Fetch),
+    Return(Vec<u8>),
+    Revert(Vec<u8>),
+    Call(Call, CallMode),
+}
+
+pub type EvmResult<T> = std::result::Result<T, EvmYield>;
 
 pub struct Evm {
     pub pc: usize,
@@ -86,32 +114,45 @@ pub struct Evm {
     pub stack: Vec<Int>,
     pub memory: Vec<u8>,
     pub code: Vec<u8>,
+    pub head: Head,
+    pub ret: Vec<u8>,
 }
 
 impl Evm {
     pub const STACK_SIZE_LIMIT: usize = 1024;
     pub const MEMORY_SIZE_LIMIT: usize = 4 * K * K;
 
-    pub fn new(code: Vec<u8>, gas: u64) -> Self {
+    pub fn new(head: Head, code: Vec<u8>, gas: u64) -> Self {
         Self {
             pc: 0,
             gas: Gas::new(gas),
             stack: Vec::with_capacity(Self::STACK_SIZE_LIMIT),
             memory: Vec::with_capacity(4 * K),
             code,
+            head,
+            ret: Vec::new(),
         }
+    }
+
+    pub fn popn_usize<const N: usize>(&mut self) -> EvmResult<[usize; N]> {
+        let mut ret = [0usize; N];
+        let pop = self.popn::<N>()?;
+        for (i, item) in ret.iter_mut().enumerate() {
+            *item = pop[i].as_usize();
+        }
+        Ok(ret)
     }
 
     pub fn popn<const N: usize>(&mut self) -> EvmResult<[Int; N]> {
         let mut ret = [Int::ZERO; N];
         if self.stack.len() < N {
-            return Err(HaltReason::StackUnderflow);
+            return Err(EvmYield::Halt(HaltReason::StackUnderflow));
         }
         for slot in ret.iter_mut() {
             if let Some(value) = self.stack.pop() {
                 *slot = value;
             } else {
-                return Err(HaltReason::StackUnderflow);
+                return Err(EvmYield::Halt(HaltReason::StackUnderflow));
             }
         }
         Ok(ret)
@@ -119,7 +160,7 @@ impl Evm {
 
     pub fn push(&mut self, int: Int) -> EvmResult<()> {
         if self.stack.len() >= Self::STACK_SIZE_LIMIT {
-            return Err(HaltReason::StackOverflow);
+            return Err(EvmYield::Halt(HaltReason::StackOverflow));
         }
         self.stack.push(int);
         Ok(())
@@ -130,7 +171,7 @@ impl Evm {
         let cap = self.memory.capacity();
         let end = (lo + source.len()).min(hi);
         if end > Evm::MEMORY_SIZE_LIMIT {
-            return Err(HaltReason::OutOfMemory);
+            return Err(EvmYield::Halt(HaltReason::OutOfMemory));
         }
         let cost = if end > self.memory.len() {
             if end > cap {
@@ -173,6 +214,14 @@ impl Evm {
                 gas_amount,
                 gas_refund,
             })
-            .or_else(|reason| Ok(StepResult::Halt(reason)))
+            .or_else(|evm_yield| {
+                Ok(match evm_yield {
+                    EvmYield::Halt(reason) => StepResult::Halt(reason),
+                    EvmYield::Fetch(fetch) => StepResult::Fetch(fetch),
+                    EvmYield::Return(ret) => StepResult::Return(ret),
+                    EvmYield::Revert(ret) => StepResult::Revert(ret),
+                    EvmYield::Call(call, mode) => StepResult::Call(call, mode),
+                })
+            })
     }
 }

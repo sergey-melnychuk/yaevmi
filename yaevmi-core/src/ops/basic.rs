@@ -50,7 +50,30 @@ pub fn div(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult
     Ok((gas, 0))
 }
 
-// TODO: 0x05 SDIV
+pub fn sdiv(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<(i64, i64)> {
+    use yaevmi_base::math::U256;
+    let gas = 5;
+    let [a, b] = evm.popn()?;
+    let f = lift(|[a, b]| {
+        if b.is_zero() {
+            return U256::ZERO;
+        }
+        let neg = |x: U256| (!x) + U256::ONE;
+        let sign_a = a.bit(255);
+        let sign_b = b.bit(255);
+        let abs_a = if sign_a { neg(a) } else { a };
+        let abs_b = if sign_b { neg(b) } else { b };
+        let result = abs_a / abs_b;
+        if sign_a != sign_b {
+            neg(result)
+        } else {
+            result
+        }
+    });
+    let r = f([a, b]);
+    evm.push(r)?;
+    Ok((gas, 0))
+}
 
 pub fn r#mod(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<(i64, i64)> {
     let gas = 3;
@@ -61,7 +84,29 @@ pub fn r#mod(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResu
     Ok((gas, 0))
 }
 
-// TODO: 0x07 SMOD
+pub fn smod(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<(i64, i64)> {
+    use yaevmi_base::math::U256;
+    let gas = 5;
+    let [a, b] = evm.popn()?;
+    let f = lift(|[a, b]| {
+        if b.is_zero() {
+            return U256::ZERO;
+        }
+        let neg = |x: U256| (!x) + U256::ONE;
+        let sign_a = a.bit(255);
+        let abs_a = if sign_a { neg(a) } else { a };
+        let abs_b = if b.bit(255) { neg(b) } else { b };
+        let result = abs_a % abs_b;
+        if sign_a && !result.is_zero() {
+            neg(result)
+        } else {
+            result
+        }
+    });
+    let r = f([a, b]);
+    evm.push(r)?;
+    Ok((gas, 0))
+}
 
 pub fn addmod(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<(i64, i64)> {
     let gas = 3;
@@ -90,7 +135,33 @@ pub fn exp(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult
     Ok((gas, 0))
 }
 
-// TODO: 0x0B SIGNEXTEND
+pub fn signextend(
+    evm: &mut Evm,
+    _: &Context,
+    _: &Call,
+    _: &mut dyn State,
+) -> EvmResult<(i64, i64)> {
+    use yaevmi_base::math::U256;
+    let gas = 5;
+    let [b, x] = evm.popn()?;
+    let f = lift(|[b, x]| {
+        if b >= U256::from(32u32) {
+            return x;
+        }
+        let b = b.saturating_to::<usize>();
+        let sign_bit = b * 8 + 7;
+        let low_bits = b * 8 + 8; // == (b+1)*8
+        let mask = if low_bits == 256 {
+            U256::MAX
+        } else {
+            (U256::ONE << low_bits) - U256::ONE
+        };
+        if x.bit(sign_bit) { x | !mask } else { x & mask }
+    });
+    let r = f([b, x]);
+    evm.push(r)?;
+    Ok((gas, 0))
+}
 
 pub fn lt(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<(i64, i64)> {
     let gas = 3;
@@ -110,8 +181,30 @@ pub fn gt(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<
     Ok((gas, 0))
 }
 
-// TODO: 0x12 SLT
-// TODO: 0x13 SGT
+pub fn slt(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<(i64, i64)> {
+    let gas = 3;
+    let [a, b] = evm.popn()?;
+    let f = lift(|[a, b]| {
+        // Signed: flip the sign bit so the unsigned order matches signed order
+        let key = |x| x ^ (ONE << 255);
+        if key(a) < key(b) { ONE } else { ZERO }
+    });
+    let r = f([a, b]);
+    evm.push(r)?;
+    Ok((gas, 0))
+}
+
+pub fn sgt(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<(i64, i64)> {
+    let gas = 3;
+    let [a, b] = evm.popn()?;
+    let f = lift(|[a, b]| {
+        let key = |x| x ^ (ONE << 255);
+        if key(a) > key(b) { ONE } else { ZERO }
+    });
+    let r = f([a, b]);
+    evm.push(r)?;
+    Ok((gas, 0))
+}
 
 pub fn eq(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<(i64, i64)> {
     let gas = 3;

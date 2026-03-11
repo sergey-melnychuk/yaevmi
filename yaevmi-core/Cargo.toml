@@ -13,5 +13,10 @@ ethnum.workspace = true
 yaevmi-base.workspace = true
 yaevmi-misc.workspace = true
 
+## Allow `EvmYield` as result error despite the size
+## TODO: consider `Call(Call, CallMode),` => `Call(Box<Call>, CallMode),`
+[lints.clippy]
+result_large_err = "allow"
+
 [dev-dependencies]
 tokio = { version = "1.50.0", features = ["full"] }

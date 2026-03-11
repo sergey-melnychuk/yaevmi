@@ -7,9 +7,12 @@ pub struct Account {
 }
 
 pub trait State {
-    fn get(&self, acc: &Acc, key: &Int) -> Option<Int>;
+    fn get(&self, acc: &Acc, key: &Int) -> Option<(Int, Int)>;
     fn put(&mut self, acc: &Acc, key: &Int, val: Int) -> Option<Int>;
     fn init(&mut self, acc: &Acc, key: &Int, val: Int) -> Int;
+
+    fn tget(&self, key: &Int) -> Option<Int>;
+    fn tput(&mut self, key: Int, val: Int) -> Option<Int>;
 
     fn inc_nonce(&mut self, acc: &Acc, nonce: u64) -> u64;
     fn set_value(&mut self, acc: &Acc, value: Int) -> Int;
@@ -32,7 +35,7 @@ pub trait State {
     fn created(&self) -> &[Acc];
     fn destroyed(&self) -> &[Acc];
 
-    fn block_head(&self, number: u64) -> Option<Head>;
+    fn head(&self, number: u64) -> Option<Head>;
     fn set_hash(&mut self, number: u64, hash: Int);
 
     fn get_delegation(&mut self, acc: &Acc) -> Option<Acc>;

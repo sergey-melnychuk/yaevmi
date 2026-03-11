@@ -1,6 +1,8 @@
+use yaevmi_base::Int;
+
 use crate::{
     Call,
-    evm::{Context, Evm, EvmResult, HaltReason},
+    evm::{Context, Evm, EvmResult, EvmYield, HaltReason},
     state::State,
 };
 
@@ -9,11 +11,129 @@ pub fn pop(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult
     Ok((3, 0))
 }
 
-// TODO: 0x51 MLOAD
-// TODO: 0x52 MSTORE
-// TODO: 0x53 MSTORE8
-// TODO: 0x54 SLOAD
-// TODO: 0x55 SSTORE
+pub fn mload(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<(i64, i64)> {
+    let [offset] = evm.popn_usize()?;
+    let (data, _) = evm.mem_get(offset..offset + 32)?;
+    let int = Int::from(data);
+    evm.push(int)?;
+    Ok((3, 0))
+}
+
+pub fn mstore(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<(i64, i64)> {
+    let mut gas = 3;
+    let [offset, value] = evm.popn()?;
+    let offset = offset.as_usize();
+    gas += evm.mem_put(offset..offset + 32, value.as_ref())?;
+    Ok((gas, 0))
+}
+
+pub fn mstore8(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<(i64, i64)> {
+    let mut gas = 3;
+    let [offset, value] = evm.popn()?;
+    let (offset, value) = (offset.as_usize(), value.as_u8());
+    gas += evm.mem_put(offset..offset + 1, &[value])?;
+    Ok((gas, 0))
+}
+
+pub fn sload(
+    evm: &mut Evm,
+    ctx: &Context,
+    _: &Call,
+    state: &mut dyn State,
+) -> EvmResult<(i64, i64)> {
+    let mut gas = 100;
+    let [key] = evm.popn()?;
+    let acc = ctx.this;
+    if !state.warm_key(&acc, &key) {
+        gas += 2000;
+    }
+    let Some((val, _)) = state.get(&acc, &key) else {
+        return Err(EvmYield::Fetch(crate::evm::Fetch::StateCell(acc, key)));
+    };
+    evm.push(val)?;
+    Ok((gas, 0))
+}
+
+// https://www.evm.codes/?fork=osaka#55
+fn sstore_gas(val: Int, cur: Int, org: Int) -> (i64, i64) {
+    // static_gas = 0
+    // if value == current_value
+    //     base_dynamic_gas = 100
+    // else if current_value == original_value
+    //     if original_value == 0
+    //         base_dynamic_gas = 20000
+    //     else
+    //         base_dynamic_gas = 2900
+    // else
+    //     base_dynamic_gas = 100
+    let g = if val == cur {
+        100
+    } else if cur == org {
+        if org.is_zero() { 20_000 } else { 2_900 }
+    } else {
+        100
+    };
+
+    // if value != current_value
+    //     if current_value == original_value
+    //         if original_value != 0 and value == 0
+    //             gas_refunds += 4800
+    //     else
+    //         if original_value != 0
+    //             if current_value == 0
+    //                 gas_refunds -= 4800
+    //             else if value == 0
+    //                 gas_refunds += 4800
+    //         if value == original_value
+    //             if original_value == 0
+    //                 gas_refunds += 20000 - 100
+    //             else
+    //                 gas_refunds += 5000 - 2100 - 100
+    let mut r = 0;
+    if val != cur {
+        if cur == org {
+            if !org.is_zero() && val.is_zero() {
+                r += 4_800;
+            }
+        } else {
+            if !org.is_zero() {
+                if cur.is_zero() {
+                    r -= 4_800;
+                } else if val.is_zero() {
+                    r += 4_800;
+                }
+            }
+            if val == org {
+                if org.is_zero() {
+                    r += 20_000 - 100;
+                } else {
+                    r += 5_000 - 2_100 - 100;
+                }
+            }
+        }
+    }
+
+    (g, r)
+}
+
+pub fn sstore(
+    evm: &mut Evm,
+    ctx: &Context,
+    _: &Call,
+    state: &mut dyn State,
+) -> EvmResult<(i64, i64)> {
+    let [key, val] = evm.popn()?;
+    let acc = ctx.this;
+    let Some((cur, org)) = state.get(&acc, &key) else {
+        return Err(EvmYield::Fetch(crate::evm::Fetch::StateCell(acc, key)));
+    };
+    let (mut gas, refund) = sstore_gas(val, cur, org);
+    if !state.warm_key(&acc, &key) {
+        gas += 2100;
+    }
+    state.put(&acc, &key, val);
+    Ok((gas, refund))
+}
 
 const JUMPDEST: u8 = 0x5B;
 
@@ -27,7 +147,7 @@ pub fn jump(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResul
         .map(|op| op == &JUMPDEST)
         .unwrap_or_default();
     if !ok {
-        return Err(HaltReason::BadJump(dst));
+        return Err(EvmYield::Halt(HaltReason::BadJump(dst)));
     }
     evm.pc = dst;
     Ok((gas, 0))
@@ -46,7 +166,7 @@ pub fn jumpi(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResu
         .map(|op| op == &JUMPDEST)
         .unwrap_or_default();
     if !ok {
-        return Err(HaltReason::BadJump(dst));
+        return Err(EvmYield::Halt(HaltReason::BadJump(dst)));
     }
     evm.pc = dst;
     Ok((gas, 0))
@@ -70,6 +190,33 @@ pub fn gas(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult
     Ok((3, 0))
 }
 
-// TODO: 0x5C TLOAD
-// TODO: 0x5D TSTORE
-// TODO: 0x5E MCOPY
+pub fn tload(evm: &mut Evm, _: &Context, _: &Call, state: &mut dyn State) -> EvmResult<(i64, i64)> {
+    let [key] = evm.popn()?;
+    let val = state.tget(&key).unwrap_or_default();
+    evm.push(val)?;
+    Ok((100, 0))
+}
+
+pub fn tstore(
+    evm: &mut Evm,
+    _: &Context,
+    _: &Call,
+    state: &mut dyn State,
+) -> EvmResult<(i64, i64)> {
+    let [key, val] = evm.popn()?;
+    state.tput(key, val);
+    Ok((100, 0))
+}
+
+pub fn mcopy(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<(i64, i64)> {
+    let mut gas = 3;
+    let [dest_offset, offset, size] = evm.popn_usize()?;
+
+    let (data, pad) = evm.mem_get(offset..offset + size)?;
+    let mut copy = vec![0; data.len() + pad];
+    copy[..data.len()].copy_from_slice(data);
+
+    let mem_exp_cost = evm.mem_put(dest_offset..dest_offset + size, &copy)?;
+    gas += mem_exp_cost;
+    Ok((gas, 0))
+}

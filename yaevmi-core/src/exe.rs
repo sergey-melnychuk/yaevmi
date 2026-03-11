@@ -1,5 +1,7 @@
 use std::ops::Range;
 
+use yaevmi_base::dto::Head;
+
 use crate::evm::{CallMode, Context, Evm, Gas, StepResult};
 use crate::state::{Chain, State, fetch};
 use crate::{Acc, Call, Error, Int, Result};
@@ -28,9 +30,22 @@ impl Executor {
         }
     }
 
-    pub async fn run(&mut self, state: &mut impl State, chain: &impl Chain) -> Result<CallResult> {
+    pub async fn run(
+        &mut self,
+        head: Head,
+        state: &mut impl State,
+        chain: &impl Chain,
+    ) -> Result<CallResult> {
         if self.callstack.is_empty() {
-            let frame = prepare(self.call.clone(), CallMode::Call, None, state, chain).await?;
+            let frame = prepare(
+                head,
+                self.call.clone(),
+                CallMode::Call(0..0),
+                None,
+                state,
+                chain,
+            )
+            .await?;
             self.callstack.push(frame);
         }
         let mut target: Range<usize> = 0..0;
@@ -58,14 +73,15 @@ impl Executor {
                         }
                         this.evm.gas.spent += gas.spent;
                         this.evm.gas.refund += gas.refund;
-
+                        this.evm.ret = ret;
                         target = 0..0;
                         result = None;
                     }
                     CallResult::Created(acc, gas) => {
-                        this.evm.stack.push(acc.widen());
+                        this.evm.stack.push(acc.to());
                         this.evm.gas.spent += gas.spent;
                         this.evm.gas.refund += gas.refund;
+                        this.evm.ret.clear();
                     }
                 }
             }
@@ -81,9 +97,9 @@ impl Executor {
                     // TODO: tracing (if enabled): EVM state, gas state, debug info
                     continue;
                 }
-                StepResult::Call(call, mode, dst) => {
-                    target = dst;
-                    let frame = prepare(call, mode, Some(&this.ctx), state, chain).await?;
+                StepResult::Call(call, mode) => {
+                    target = mode.range();
+                    let frame = prepare(head, call, mode, Some(&this.ctx), state, chain).await?;
                     self.callstack.push(frame);
                 }
                 StepResult::Return(ret) => {
@@ -126,6 +142,7 @@ impl Executor {
 }
 
 async fn prepare(
+    head: Head,
     call: Call,
     mode: CallMode,
     ctx: Option<&Context>,
@@ -141,22 +158,24 @@ async fn prepare(
         let (code, _) = chain.code(&call.to).await?;
         code
     };
-    let evm = Evm::new(code, call.gas);
+    let evm = Evm::new(head, code, call.gas);
     let ctx = if let Some(ctx) = ctx {
         let this = match mode {
-            CallMode::Create => Acc::ZERO,  // TODO: derive CREATE address
-            CallMode::Create2 => Acc::ZERO, // TODO: derive CREATE2 address
-            CallMode::Call | CallMode::Static => call.to,
-            CallMode::CallCode | CallMode::Delegate => ctx.this,
+            CallMode::Create(acc) => acc,
+            CallMode::Create2(acc) => acc,
+            CallMode::Call(_) | CallMode::Static(_) => call.to,
+            CallMode::CallCode(_) | CallMode::Delegate(_) => ctx.this,
         };
         Context {
-            is_static: ctx.is_static || matches!(mode, CallMode::Static | CallMode::CallCode),
+            origin: ctx.origin,
+            is_static: ctx.is_static || matches!(mode, CallMode::Static(_) | CallMode::CallCode(_)),
             depth: ctx.depth + 1,
             this,
         }
     } else {
         Context {
-            is_static: matches!(mode, CallMode::Static | CallMode::CallCode),
+            origin: call.by,
+            is_static: matches!(mode, CallMode::Static(_) | CallMode::CallCode(_)),
             depth: 1,
             this: call.to,
         }

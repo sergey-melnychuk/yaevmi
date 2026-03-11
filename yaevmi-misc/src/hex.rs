@@ -124,11 +124,21 @@ impl<const N: usize> From<u8> for Hex<N> {
 }
 
 impl<const N: usize> Hex<N> {
-    pub fn widen<const M: usize>(self) -> Hex<M> {
-        assert!(M >= N, "data loss detected");
+    pub fn to<const M: usize>(self) -> Hex<M> {
         let mut buffer = [0; M];
-        buffer[(M - N)..].copy_from_slice(&self.0);
+        if M > N {
+            buffer[(M - N)..].copy_from_slice(&self.0);
+        } else {
+            buffer[..].copy_from_slice(&self.0[(N - M)..]);
+        }
         Hex(buffer)
+    }
+}
+
+impl<const N: usize> Default for Hex<N> {
+    fn default() -> Self {
+        let buffer = [0; N];
+        Self(buffer)
     }
 }
 

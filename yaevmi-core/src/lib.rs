@@ -40,20 +40,3 @@ pub struct Call {
     pub nonce: Option<u64>,
 }
 
-// mod x {
-//     use yaevmi_base::{Acc, Int};
-//     use crate::{Call, exe::Executor};
-//     async fn f() {
-//         let call = Call {
-//             by: Acc::zero(),
-//             to: Acc::one(),
-//             gas: 42,
-//             eth: Int::zero(),
-//             data: vec![],
-//             auth: vec![],
-//             nonce: None,
-//         };
-//         let x = Executor::new(call);
-//         x.run(state, chain).await
-//     }
-// }

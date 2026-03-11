@@ -1,6 +1,6 @@
 use crate::{
     Call,
-    evm::{Context, Evm, EvmResult, HaltReason},
+    evm::{Context, Evm, EvmResult, EvmYield, HaltReason},
     state::State,
 };
 
@@ -15,7 +15,7 @@ pub type Handler = fn(&mut Evm, &Context, &Call, &mut dyn State) -> EvmResult<(i
 
 pub fn invalid(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<(i64, i64)> {
     let op = evm.code.get(evm.pc).copied().unwrap_or_default();
-    Err(HaltReason::BadOpcode(op))
+    Err(EvmYield::Halt(HaltReason::BadOpcode(op)))
 }
 
 pub const OPS: [(&str, Handler); 256] = [
@@ -25,13 +25,13 @@ pub const OPS: [(&str, Handler); 256] = [
     ("MUL", basic::mul),
     ("SUB", basic::sub),
     ("DIV", basic::div),
-    ("SDIV", invalid),
+    ("SDIV", basic::sdiv),
     ("MOD", basic::r#mod),
-    ("SMOD", invalid),
+    ("SMOD", basic::smod),
     ("ADDMOD", basic::addmod),
     ("MULMOD", basic::mulmod),
     ("EXP", basic::exp),
-    ("SIGNEXTEND", invalid),
+    ("SIGNEXTEND", basic::signextend),
     ("INVALID/0x0C", invalid),
     ("INVALID/0x0D", invalid),
     ("INVALID/0x0E", invalid),
@@ -39,8 +39,8 @@ pub const OPS: [(&str, Handler); 256] = [
     // 0x10
     ("LT", basic::lt),
     ("GT", basic::gt),
-    ("SLT", invalid),
-    ("SGT", invalid),
+    ("SLT", basic::slt),
+    ("SGT", basic::sgt),
     ("EQ", basic::eq),
     ("ISZERO", basic::iszero),
     ("AND", basic::and),
@@ -71,34 +71,34 @@ pub const OPS: [(&str, Handler); 256] = [
     ("INVALID/0x2E", invalid),
     ("INVALID/0x2F", invalid),
     // 0x30
-    ("ADDRESS", invalid),
-    ("BALANCE", invalid),
-    ("ORIGIN", invalid),
-    ("CALLER", invalid),
-    ("CALLVALUE", invalid),
-    ("CALLDATALOAD", invalid),
-    ("CALLDATASIZE", invalid),
-    ("CALLDATACOPY", invalid),
-    ("CODESIZE", invalid),
-    ("CODECOPY", invalid),
-    ("GASPRICE", invalid),
-    ("EXTCODESIZE", invalid),
-    ("EXTCODECOPY", invalid),
-    ("RETURNDATASIZE", invalid),
-    ("RETURNDATACOPY", invalid),
-    ("EXTCODEHASH", invalid),
+    ("ADDRESS", chain::address),
+    ("BALANCE", chain::balance),
+    ("ORIGIN", chain::origin),
+    ("CALLER", chain::caller),
+    ("CALLVALUE", chain::callvalue),
+    ("CALLDATALOAD", chain::calldataload),
+    ("CALLDATASIZE", chain::calldatasize),
+    ("CALLDATACOPY", chain::calldatacopy),
+    ("CODESIZE", chain::codesize),
+    ("CODECOPY", chain::codecopy),
+    ("GASPRICE", chain::gasprice),
+    ("EXTCODESIZE", chain::extcodesize),
+    ("EXTCODECOPY", chain::extcodecopy),
+    ("RETURNDATASIZE", chain::returndatasize),
+    ("RETURNDATACOPY", chain::returndatacopy),
+    ("EXTCODEHASH", chain::extcodehash),
     // 0x40
-    ("BLOCKHASH", invalid),
-    ("COINBASE", invalid),
-    ("TIMESTAMP", invalid),
-    ("NUMBER", invalid),
-    ("PREVRANDAO", invalid),
-    ("GASLIMIT", invalid),
-    ("CHAINID", invalid),
-    ("SELFBALANCE", invalid),
-    ("BASEFEE", invalid),
-    ("BLOBHASH", invalid),
-    ("BLOBBASEFEE", invalid),
+    ("BLOCKHASH", chain::blockhash),
+    ("COINBASE", chain::coinbase),
+    ("TIMESTAMP", chain::timestamp),
+    ("NUMBER", chain::number),
+    ("PREVRANDAO", chain::prevrandao),
+    ("GASLIMIT", chain::gaslimit),
+    ("CHAINID", chain::chainid),
+    ("SELFBALANCE", chain::selfbalance),
+    ("BASEFEE", chain::basefee),
+    ("BLOBHASH", chain::blobhash),
+    ("BLOBBASEFEE", chain::blobbasefee),
     ("INVALID/0x4B", invalid),
     ("INVALID/0x4C", invalid),
     ("INVALID/0x4D", invalid),
@@ -106,20 +106,20 @@ pub const OPS: [(&str, Handler); 256] = [
     ("INVALID/0x4F", invalid),
     // 0x50
     ("POP", store::pop),
-    ("MLOAD", invalid),
-    ("MSTORE", invalid),
-    ("MSTORE8", invalid),
-    ("SLOAD", invalid),
-    ("SSTORE", invalid),
+    ("MLOAD", store::mload),
+    ("MSTORE", store::mstore),
+    ("MSTORE8", store::mstore8),
+    ("SLOAD", store::sload),
+    ("SSTORE", store::sstore),
     ("JUMP", store::jump),
     ("JUMPI", store::jumpi),
     ("PC", store::pc),
     ("MSIZE", store::msize),
     ("GAS", store::gas),
     ("JUMPDEST", invalid),
-    ("TLOAD", invalid),
-    ("TSTORE", invalid),
-    ("MCOPY", invalid),
+    ("TLOAD", store::tload),
+    ("TSTORE", store::tstore),
+    ("MCOPY", store::mcopy),
     ("PUSH0", stack::push),
     // 0x60
     ("PUSH1", stack::push),
@@ -275,22 +275,22 @@ pub const OPS: [(&str, Handler); 256] = [
     ("INVALID/0xEE", invalid),
     ("INVALID/0xEF", invalid),
     // 0xF0
-    ("CREATE", invalid),
-    ("CALL", invalid),
-    ("CALLCODE", invalid),
-    ("RETURN", invalid),
-    ("DELEGATECALL", invalid),
-    ("CREATE2", invalid),
+    ("CREATE", calls::create),
+    ("CALL", calls::call),
+    ("CALLCODE", calls::callcode),
+    ("RETURN", calls::r#return),
+    ("DELEGATECALL", calls::delegatecall),
+    ("CREATE2", calls::create2),
     ("INVALID/0xF6", invalid),
     ("INVALID/0xF7", invalid),
     ("INVALID/0xF8", invalid),
     ("INVALID/0xF9", invalid),
-    ("STATICCALL", invalid),
+    ("STATICCALL", calls::staticcall),
     ("INVALID/0xFB", invalid),
     ("INVALID/0xFC", invalid),
-    ("REVERT", invalid),
+    ("REVERT", calls::revert),
     ("INVALID/0xFE", invalid),
-    ("SELFDESTRUCT", invalid),
+    ("SELFDESTRUCT", calls::selfdestruct),
 ];
 
 #[cfg(test)]
@@ -303,6 +303,7 @@ pub mod tests {
 
     pub fn ctx() -> Context {
         Context {
+            origin: Acc::ZERO,
             is_static: false,
             depth: 0,
             this: Acc::ZERO,
@@ -338,7 +339,7 @@ pub mod tests {
     }
 
     impl State for Empty {
-        fn get(&self, _: &Acc, _: &Int) -> Option<Int> {
+        fn get(&self, _: &Acc, _: &Int) -> Option<(Int, Int)> {
             None
         }
         fn put(&mut self, _: &Acc, _: &Int, _: Int) -> Option<Int> {
@@ -346,6 +347,12 @@ pub mod tests {
         }
         fn init(&mut self, _: &Acc, _: &Int, _: Int) -> Int {
             Int::ZERO
+        }
+        fn tget(&self, _: &Int) -> Option<Int> {
+            None
+        }
+        fn tput(&mut self, _: Int, _: Int) -> Option<Int> {
+            None
         }
         fn inc_nonce(&mut self, _: &Acc, _: u64) -> u64 {
             0
@@ -392,7 +399,7 @@ pub mod tests {
         fn destroyed(&self) -> &[Acc] {
             &[]
         }
-        fn block_head(&self, _: u64) -> Option<Head> {
+        fn head(&self, _: u64) -> Option<Head> {
             None
         }
         fn set_hash(&mut self, _: u64, _: Int) {
