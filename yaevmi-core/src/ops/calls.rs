@@ -7,8 +7,8 @@ use crate::{
 };
 
 // TODO: 0xF0 CREATE
-pub fn create(evm: &mut Evm, ctx: &Context, _: &Call, _: &mut dyn State) -> EvmResult<(i64, i64)> {
-    let [value, offset, size] = evm.popn()?;
+pub fn create(evm: &mut Evm, ctx: &Context, _: &Call, _: &mut dyn State) -> EvmResult<()> {
+    let [value, offset, size] = evm.peek()?;
     let (offset, size) = (offset.as_usize(), size.as_usize());
     let (data, _pad) = evm.mem_get(offset..offset + size)?;
 
@@ -28,7 +28,7 @@ pub fn create(evm: &mut Evm, ctx: &Context, _: &Call, _: &mut dyn State) -> EvmR
 }
 
 // TODO: 0xF1 CALL
-pub fn call(evm: &mut Evm, ctx: &Context, _: &Call, _: &mut dyn State) -> EvmResult<(i64, i64)> {
+pub fn call(evm: &mut Evm, ctx: &Context, _: &Call, _: &mut dyn State) -> EvmResult<()> {
     let [
         gas,
         address,
@@ -37,7 +37,7 @@ pub fn call(evm: &mut Evm, ctx: &Context, _: &Call, _: &mut dyn State) -> EvmRes
         args_size,
         ret_offset,
         ret_size,
-    ] = evm.popn()?;
+    ] = evm.peek()?;
     let (args_offset, args_size) = (args_offset.as_usize(), args_size.as_usize());
     let (ret_offset, ret_size) = (ret_offset.as_usize(), ret_size.as_usize());
     let address: Acc = address.to();
@@ -61,12 +61,7 @@ pub fn call(evm: &mut Evm, ctx: &Context, _: &Call, _: &mut dyn State) -> EvmRes
 }
 
 // TODO: 0xF2 CALLCODE
-pub fn callcode(
-    evm: &mut Evm,
-    ctx: &Context,
-    _: &Call,
-    _: &mut dyn State,
-) -> EvmResult<(i64, i64)> {
+pub fn callcode(evm: &mut Evm, ctx: &Context, _: &Call, _: &mut dyn State) -> EvmResult<()> {
     let [
         gas,
         address,
@@ -75,7 +70,7 @@ pub fn callcode(
         args_size,
         ret_offset,
         ret_size,
-    ] = evm.popn()?;
+    ] = evm.peek()?;
     let (args_offset, args_size) = (args_offset.as_usize(), args_size.as_usize());
     let (ret_offset, ret_size) = (ret_offset.as_usize(), ret_size.as_usize());
     let address: Acc = address.to();
@@ -98,8 +93,8 @@ pub fn callcode(
     ))
 }
 
-pub fn r#return(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<(i64, i64)> {
-    let [offset, size] = evm.popn_usize()?;
+pub fn r#return(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<()> {
+    let [offset, size] = evm.peek_usize()?;
     let (mem, pad) = evm.mem_get(offset..offset + size)?;
     let mut ret = vec![0; mem.len() + pad];
     ret[..mem.len()].copy_from_slice(mem);
@@ -107,12 +102,7 @@ pub fn r#return(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmR
 }
 
 // TODO: 0xF4 DELEGATECALL
-pub fn delegatecall(
-    evm: &mut Evm,
-    ctx: &Context,
-    _: &Call,
-    _: &mut dyn State,
-) -> EvmResult<(i64, i64)> {
+pub fn delegatecall(evm: &mut Evm, ctx: &Context, _: &Call, _: &mut dyn State) -> EvmResult<()> {
     let [
         gas,
         address,
@@ -121,7 +111,7 @@ pub fn delegatecall(
         args_size,
         ret_offset,
         ret_size,
-    ] = evm.popn()?;
+    ] = evm.peek()?;
     let (args_offset, args_size) = (args_offset.as_usize(), args_size.as_usize());
     let (ret_offset, ret_size) = (ret_offset.as_usize(), ret_size.as_usize());
     let address: Acc = address.to();
@@ -145,8 +135,8 @@ pub fn delegatecall(
 }
 
 // TODO: 0xF5 CREATE2
-pub fn create2(evm: &mut Evm, ctx: &Context, _: &Call, _: &mut dyn State) -> EvmResult<(i64, i64)> {
-    let [value, offset, size, _salt] = evm.popn()?;
+pub fn create2(evm: &mut Evm, ctx: &Context, _: &Call, _: &mut dyn State) -> EvmResult<()> {
+    let [value, offset, size, _salt] = evm.peek()?;
     let (offset, size) = (offset.as_usize(), size.as_usize());
     let (data, _pad) = evm.mem_get(offset..offset + size)?;
 
@@ -167,13 +157,8 @@ pub fn create2(evm: &mut Evm, ctx: &Context, _: &Call, _: &mut dyn State) -> Evm
 }
 
 // TODO: 0xFA STATICCALL
-pub fn staticcall(
-    evm: &mut Evm,
-    ctx: &Context,
-    _: &Call,
-    _: &mut dyn State,
-) -> EvmResult<(i64, i64)> {
-    let [gas, address, args_offset, args_size, ret_offset, ret_size] = evm.popn()?;
+pub fn staticcall(evm: &mut Evm, ctx: &Context, _: &Call, _: &mut dyn State) -> EvmResult<()> {
+    let [gas, address, args_offset, args_size, ret_offset, ret_size] = evm.peek()?;
     let (args_offset, args_size) = (args_offset.as_usize(), args_size.as_usize());
     let (ret_offset, ret_size) = (ret_offset.as_usize(), ret_size.as_usize());
     let address: Acc = address.to();
@@ -196,8 +181,8 @@ pub fn staticcall(
     ))
 }
 
-pub fn revert(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<(i64, i64)> {
-    let [offset, size] = evm.popn_usize()?;
+pub fn revert(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<()> {
+    let [offset, size] = evm.peek_usize()?;
     let (mem, pad) = evm.mem_get(offset..offset + size)?;
     let mut ret = vec![0; mem.len() + pad];
     ret[..mem.len()].copy_from_slice(mem);
@@ -205,12 +190,7 @@ pub fn revert(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmRes
 }
 
 // TODO: 0xFF SELFDESTRUCT
-pub fn selfdestruct(
-    _evm: &mut Evm,
-    _: &Context,
-    _: &Call,
-    _: &mut dyn State,
-) -> EvmResult<(i64, i64)> {
+pub fn selfdestruct(_evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<()> {
     // TODO: transfer value, mark deleted
-    Ok((0, 0))
+    Ok(())
 }

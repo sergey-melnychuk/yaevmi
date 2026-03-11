@@ -1,4 +1,6 @@
-#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+use std::fmt;
+
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Hex<const N: usize>([u8; N]);
 
 impl<const N: usize> Hex<N> {
@@ -83,43 +85,37 @@ impl<const N: usize> From<&[u8]> for Hex<N> {
 
 impl<const N: usize> From<usize> for Hex<N> {
     fn from(value: usize) -> Self {
-        let buffer = value.to_be_bytes();
-        Self::from(&buffer[..])
+        Self::from(&value.to_be_bytes()[..])
     }
 }
 
 impl<const N: usize> From<u128> for Hex<N> {
     fn from(value: u128) -> Self {
-        let buffer = value.to_be_bytes();
-        Self::from(&buffer[..])
+        Self::from(&value.to_be_bytes()[..])
     }
 }
 
 impl<const N: usize> From<u64> for Hex<N> {
     fn from(value: u64) -> Self {
-        let buffer = value.to_be_bytes();
-        Self::from(&buffer[..])
+        Self::from(&value.to_be_bytes()[..])
     }
 }
 
 impl<const N: usize> From<u32> for Hex<N> {
     fn from(value: u32) -> Self {
-        let buffer = value.to_be_bytes();
-        Self::from(&buffer[..])
+        Self::from(&value.to_be_bytes()[..])
     }
 }
 
 impl<const N: usize> From<u16> for Hex<N> {
     fn from(value: u16) -> Self {
-        let buffer = value.to_be_bytes();
-        Self::from(&buffer[..])
+        Self::from(&value.to_be_bytes()[..])
     }
 }
 
 impl<const N: usize> From<u8> for Hex<N> {
     fn from(value: u8) -> Self {
-        let buffer = [value];
-        Self::from(&buffer[..])
+        Self::from(&[value][..])
     }
 }
 
@@ -137,8 +133,48 @@ impl<const N: usize> Hex<N> {
 
 impl<const N: usize> Default for Hex<N> {
     fn default() -> Self {
-        let buffer = [0; N];
-        Self(buffer)
+        Self([0; N])
+    }
+}
+
+impl<const N: usize> fmt::Display for Hex<N> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("0x")?;
+        for b in &self.0 {
+            write!(f, "{:02x}", b)?;
+        }
+        Ok(())
+    }
+}
+
+impl<const N: usize> fmt::Debug for Hex<N> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("0x")?;
+        for b in &self.0 {
+            write!(f, "{:02x}", b)?;
+        }
+        Ok(())
+    }
+}
+
+impl<const N: usize> serde::Serialize for Hex<N> {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        s.collect_str(self)
+    }
+}
+
+impl<'de, const N: usize> serde::Deserialize<'de> for Hex<N> {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let s = <&str>::deserialize(d)?;
+        let s = s.strip_prefix("0x").unwrap_or(s);
+        let bytes = hex::decode(s).map_err(serde::de::Error::custom)?;
+        if bytes.len() > N {
+            return Err(serde::de::Error::custom(format!(
+                "hex value too long: {} bytes, max {N}",
+                bytes.len()
+            )));
+        }
+        Ok(Self::from(&bytes[..]))
     }
 }
 
@@ -213,5 +249,29 @@ mod tests {
     #[should_panic]
     fn test_parse_invalid_char() {
         let _ = parse::<4>("xyz0");
+    }
+
+    #[test]
+    fn test_display() {
+        let h = Hex::<4>::from(&[0x00, 0x00, 0xbe, 0xef][..]);
+        assert_eq!(h.to_string(), "0x0000beef");
+        let z = Hex::<4>::ZERO;
+        assert_eq!(z.to_string(), "0x00000000");
+        let one = Hex::<4>::ONE;
+        assert_eq!(one.to_string(), "0x00000001");
+    }
+
+    #[test]
+    fn test_debug() {
+        let h = Hex::<4>::from(&[0x00, 0x00, 0xbe, 0xef][..]);
+        assert_eq!(format!("{:?}", h), "0x0000beef");
+    }
+
+    #[test]
+    fn test_serde_roundtrip() {
+        let h = Hex::<4>::from(&[0xde, 0xad, 0xbe, 0xef][..]);
+        let s = serde_json::to_string(&h).unwrap();
+        let h2: Hex<4> = serde_json::from_str(&s).unwrap();
+        assert_eq!(h, h2);
     }
 }

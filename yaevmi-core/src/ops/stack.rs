@@ -4,8 +4,8 @@ use crate::{
     state::State,
 };
 
-pub fn push(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<(i64, i64)> {
-    let gas = 3;
+pub fn push(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<()> {
+    evm.gas.take(3)?;
     let op = evm.code[evm.pc];
     let len = len(op);
     let int = if len == 0 {
@@ -20,22 +20,22 @@ pub fn push(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResul
     };
     evm.push(int)?;
     evm.pc += len;
-    Ok((gas, 0))
+    Ok(())
 }
 
-pub fn dup(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<(i64, i64)> {
-    let gas = 3;
+pub fn dup(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<()> {
+    evm.gas.take(3)?;
     let op = evm.code[evm.pc];
     let n = idx(op) - 1;
     let Some(int) = evm.stack.iter().rev().nth(n).copied() else {
         return Err(EvmYield::Halt(HaltReason::StackUnderflow));
     };
     evm.push(int)?;
-    Ok((gas, 0))
+    Ok(())
 }
 
-pub fn swap(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<(i64, i64)> {
-    let gas = 3;
+pub fn swap(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<()> {
+    evm.gas.take(3)?;
     let op = evm.code[evm.pc];
     let n = idx(op); // SWAP{k}: swap top with (k+1)th, distance = k = idx(op)
     if evm.stack.len() <= n {
@@ -44,7 +44,7 @@ pub fn swap(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResul
     let i = evm.stack.len() - 1;
     let j = i - n;
     evm.stack.swap(i, j);
-    Ok((gas, 0))
+    Ok(())
 }
 
 pub fn len(op: u8) -> usize {
@@ -77,7 +77,7 @@ mod tests {
         Int::from(val.to_be_bytes().as_slice())
     }
 
-    fn is_halt(result: EvmResult<(i64, i64)>, expected: HaltReason) -> bool {
+    fn is_halt(result: EvmResult<()>, expected: HaltReason) -> bool {
         match (result, expected) {
             (Err(EvmYield::Halt(HaltReason::StackUnderflow)), HaltReason::StackUnderflow) => true,
             (Err(EvmYield::Halt(HaltReason::BadOpcode(a))), HaltReason::BadOpcode(b)) => a == b,

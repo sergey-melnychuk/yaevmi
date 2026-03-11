@@ -1,5 +1,6 @@
 use crate::hex::Hex;
 
+pub mod buf;
 pub mod hex;
 pub mod http;
 

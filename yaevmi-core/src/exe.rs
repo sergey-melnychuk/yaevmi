@@ -56,7 +56,7 @@ impl Executor {
                     CallResult::Done { status, ret, gas } => {
                         this.evm.stack.push(status);
                         if !status.is_zero() && !ret.is_empty() {
-                            let mem_exp_cost = match this.evm.mem_put(target, &ret) {
+                            match this.evm.mem_put(target, &ret) {
                                 Ok(gas) => gas,
                                 Err(_reason) => {
                                     target = 0..0;
@@ -69,7 +69,6 @@ impl Executor {
                                     continue;
                                 }
                             };
-                            this.evm.gas.spent += mem_exp_cost;
                         }
                         this.evm.gas.spent += gas.spent;
                         this.evm.gas.refund += gas.refund;
@@ -86,17 +85,8 @@ impl Executor {
                 }
             }
             match this.evm.step(&this.ctx, &this.call, state)? {
+                StepResult::Ok => continue,
                 StepResult::End => break,
-                StepResult::Ok {
-                    gas_amount: spent,
-                    gas_refund: refund,
-                } => {
-                    this.evm.gas.spent += spent;
-                    this.evm.gas.refund += refund;
-
-                    // TODO: tracing (if enabled): EVM state, gas state, debug info
-                    continue;
-                }
                 StepResult::Call(call, mode) => {
                     target = mode.range();
                     let frame = prepare(head, call, mode, Some(&this.ctx), state, chain).await?;
@@ -124,11 +114,16 @@ impl Executor {
                     self.callstack.pop();
                 }
                 StepResult::Halt(_reason) => {
-                    // TODO: handle revert
+                    // Halts (exceptions) consume all remaining gas — no refund
+                    let gas = Gas {
+                        spent: this.evm.gas.limit,
+                        refund: 0,
+                        ..this.evm.gas
+                    };
                     result = Some(CallResult::Done {
                         status: Int::ZERO,
                         ret: vec![],
-                        gas: this.evm.gas,
+                        gas,
                     });
                     self.callstack.pop();
                 }

@@ -11,9 +11,9 @@ pub mod logs;
 pub mod stack;
 pub mod store;
 
-pub type Handler = fn(&mut Evm, &Context, &Call, &mut dyn State) -> EvmResult<(i64, i64)>;
+pub type Handler = fn(&mut Evm, &Context, &Call, &mut dyn State) -> EvmResult<()>;
 
-pub fn invalid(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<(i64, i64)> {
+pub fn invalid(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<()> {
     let op = evm.code.get(evm.pc).copied().unwrap_or_default();
     Err(EvmYield::Halt(HaltReason::BadOpcode(op)))
 }

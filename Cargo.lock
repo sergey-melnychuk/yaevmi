@@ -2620,6 +2620,7 @@ name = "yaevmi-misc"
 version = "0.1.0"
 dependencies = [
  "eyre",
+ "hex",
  "keccak-asm",
  "reqwest",
  "serde",
@@ -2630,6 +2631,17 @@ dependencies = [
 [[package]]
 name = "yaevmi-test"
 version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "eyre",
+ "hex",
+ "serde",
+ "serde_json",
+ "tokio",
+ "yaevmi-base",
+ "yaevmi-core",
+ "yaevmi-misc",
+]
 
 [[package]]
 name = "yaevmi-wasm"

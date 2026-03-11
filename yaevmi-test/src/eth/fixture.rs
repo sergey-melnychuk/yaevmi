@@ -1,0 +1,65 @@
+use serde::Deserialize;
+use std::collections::HashMap;
+use yaevmi_base::{Acc, Int};
+use yaevmi_misc::buf::Buf;
+
+// Top-level file: map from test name to test case
+pub type TestFile = HashMap<String, TestCase>;
+
+#[derive(Deserialize)]
+pub struct TestCase {
+    pub env: Env,
+    pub pre: HashMap<Acc, PreAccount>,
+    pub transaction: Transaction,
+    pub post: HashMap<String, Vec<PostEntry>>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Env {
+    pub current_coinbase: Acc,
+    pub current_gas_limit: Int,
+    pub current_number: Int,
+    pub current_timestamp: Int,
+    pub current_base_fee: Option<Int>,
+    pub current_random: Option<Int>,
+    pub current_difficulty: Option<Int>,
+}
+
+#[derive(Deserialize)]
+pub struct PreAccount {
+    pub balance: Int,
+    pub code: Buf,
+    pub nonce: Int,
+    pub storage: HashMap<Int, Int>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Transaction {
+    pub data: Vec<Buf>,
+    pub gas_limit: Vec<Int>,
+    pub gas_price: Option<Int>,
+    pub max_fee_per_gas: Option<Int>,
+    pub max_priority_fee_per_gas: Option<Int>,
+    pub nonce: Int,
+    pub sender: Acc,
+    pub to: Option<Acc>,
+    pub value: Vec<Int>,
+}
+
+#[derive(Deserialize)]
+pub struct PostEntry {
+    pub indexes: Indexes,
+    pub hash: Int,
+    pub logs: Int,
+    #[serde(default)]
+    pub state: HashMap<Acc, PreAccount>,
+}
+
+#[derive(Deserialize)]
+pub struct Indexes {
+    pub data: usize,
+    pub gas: usize,
+    pub value: usize,
+}

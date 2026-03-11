@@ -1,4 +1,4 @@
-use crate::Int;
+use crate::{Acc, Int};
 
 // TODO: RPC DTOs: block, header, tx
 
@@ -10,7 +10,7 @@ pub struct Head {
     pub hash: Int,
     pub gas_price: Int, // TODO: move to tx, update opcode impl
     pub gas_limit: Int,
-    pub coinbase: Int,
+    pub coinbase: Acc,
     pub timestamp: Int,
     pub base_fee: Int,
     pub blob_base_fee: Int,

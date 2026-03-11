@@ -39,4 +39,3 @@ pub struct Call {
     pub auth: Vec<Acc>,
     pub nonce: Option<u64>,
 }
-

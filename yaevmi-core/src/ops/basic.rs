@@ -10,50 +10,50 @@ use crate::{
     state::State,
 };
 
-pub fn stop(_: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<(i64, i64)> {
-    Ok((0, 0))
+pub fn stop(_: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<()> {
+    Ok(())
 }
 
-pub fn add(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<(i64, i64)> {
-    let gas = 3;
-    let [a, b] = evm.popn()?;
+pub fn add(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<()> {
+    evm.gas.take(3)?;
+    let [a, b] = evm.peek()?;
     let f = lift(|[a, b]| a + b);
     let r = f([a, b]);
     evm.push(r)?;
-    Ok((gas, 0))
+    Ok(())
 }
 
-pub fn mul(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<(i64, i64)> {
-    let gas = 3;
-    let [a, b] = evm.popn()?;
+pub fn mul(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<()> {
+    evm.gas.take(3)?;
+    let [a, b] = evm.peek()?;
     let f = lift(|[a, b]| a * b);
     let r = f([a, b]);
     evm.push(r)?;
-    Ok((gas, 0))
+    Ok(())
 }
 
-pub fn sub(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<(i64, i64)> {
-    let gas = 3;
-    let [a, b] = evm.popn()?;
+pub fn sub(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<()> {
+    evm.gas.take(3)?;
+    let [a, b] = evm.peek()?;
     let f = lift(|[a, b]| a - b);
     let r = f([a, b]);
     evm.push(r)?;
-    Ok((gas, 0))
+    Ok(())
 }
 
-pub fn div(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<(i64, i64)> {
-    let gas = 3;
-    let [a, b] = evm.popn()?;
+pub fn div(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<()> {
+    evm.gas.take(3)?;
+    let [a, b] = evm.peek()?;
     let f = lift(|[a, b]| a / b);
     let r = f([a, b]);
     evm.push(r)?;
-    Ok((gas, 0))
+    Ok(())
 }
 
-pub fn sdiv(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<(i64, i64)> {
+pub fn sdiv(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<()> {
     use yaevmi_base::math::U256;
-    let gas = 5;
-    let [a, b] = evm.popn()?;
+    evm.gas.take(5)?;
+    let [a, b] = evm.peek()?;
     let f = lift(|[a, b]| {
         if b.is_zero() {
             return U256::ZERO;
@@ -72,22 +72,22 @@ pub fn sdiv(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResul
     });
     let r = f([a, b]);
     evm.push(r)?;
-    Ok((gas, 0))
+    Ok(())
 }
 
-pub fn r#mod(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<(i64, i64)> {
-    let gas = 3;
-    let [a, b] = evm.popn()?;
+pub fn r#mod(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<()> {
+    evm.gas.take(3)?;
+    let [a, b] = evm.peek()?;
     let f = lift(|[a, b]| a % b);
     let r = f([a, b]);
     evm.push(r)?;
-    Ok((gas, 0))
+    Ok(())
 }
 
-pub fn smod(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<(i64, i64)> {
+pub fn smod(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<()> {
     use yaevmi_base::math::U256;
-    let gas = 5;
-    let [a, b] = evm.popn()?;
+    evm.gas.take(5)?;
+    let [a, b] = evm.peek()?;
     let f = lift(|[a, b]| {
         if b.is_zero() {
             return U256::ZERO;
@@ -105,45 +105,40 @@ pub fn smod(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResul
     });
     let r = f([a, b]);
     evm.push(r)?;
-    Ok((gas, 0))
+    Ok(())
 }
 
-pub fn addmod(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<(i64, i64)> {
-    let gas = 3;
-    let [a, b, m] = evm.popn()?;
+pub fn addmod(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<()> {
+    evm.gas.take(3)?;
+    let [a, b, m] = evm.peek()?;
     let f = lift(|[a, b, m]| a.add_mod(b, m));
     let r = f([a, b, m]);
     evm.push(r)?;
-    Ok((gas, 0))
+    Ok(())
 }
 
-pub fn mulmod(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<(i64, i64)> {
-    let gas = 3;
-    let [a, b, m] = evm.popn()?;
+pub fn mulmod(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<()> {
+    evm.gas.take(3)?;
+    let [a, b, m] = evm.peek()?;
     let f = lift(|[a, b, m]| a.mul_mod(b, m));
     let r = f([a, b, m]);
     evm.push(r)?;
-    Ok((gas, 0))
+    Ok(())
 }
 
-pub fn exp(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<(i64, i64)> {
-    let gas = 3;
-    let [a, b] = evm.popn()?;
+pub fn exp(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<()> {
+    evm.gas.take(3)?;
+    let [a, b] = evm.peek()?;
     let f = lift(|[a, b]| a.pow(b));
     let r = f([a, b]);
     evm.push(r)?;
-    Ok((gas, 0))
+    Ok(())
 }
 
-pub fn signextend(
-    evm: &mut Evm,
-    _: &Context,
-    _: &Call,
-    _: &mut dyn State,
-) -> EvmResult<(i64, i64)> {
+pub fn signextend(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<()> {
     use yaevmi_base::math::U256;
-    let gas = 5;
-    let [b, x] = evm.popn()?;
+    evm.gas.take(5)?;
+    let [b, x] = evm.peek()?;
     let f = lift(|[b, x]| {
         if b >= U256::from(32u32) {
             return x;
@@ -160,30 +155,30 @@ pub fn signextend(
     });
     let r = f([b, x]);
     evm.push(r)?;
-    Ok((gas, 0))
+    Ok(())
 }
 
-pub fn lt(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<(i64, i64)> {
-    let gas = 3;
-    let [a, b] = evm.popn()?;
+pub fn lt(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<()> {
+    evm.gas.take(3)?;
+    let [a, b] = evm.peek()?;
     let f = lift(|[a, b]| if a < b { ONE } else { ZERO });
     let r = f([a, b]);
     evm.push(r)?;
-    Ok((gas, 0))
+    Ok(())
 }
 
-pub fn gt(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<(i64, i64)> {
-    let gas = 3;
-    let [a, b] = evm.popn()?;
+pub fn gt(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<()> {
+    evm.gas.take(3)?;
+    let [a, b] = evm.peek()?;
     let f = lift(|[a, b]| if a > b { ONE } else { ZERO });
     let r = f([a, b]);
     evm.push(r)?;
-    Ok((gas, 0))
+    Ok(())
 }
 
-pub fn slt(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<(i64, i64)> {
-    let gas = 3;
-    let [a, b] = evm.popn()?;
+pub fn slt(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<()> {
+    evm.gas.take(3)?;
+    let [a, b] = evm.peek()?;
     let f = lift(|[a, b]| {
         // Signed: flip the sign bit so the unsigned order matches signed order
         let key = |x| x ^ (ONE << 255);
@@ -191,130 +186,130 @@ pub fn slt(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult
     });
     let r = f([a, b]);
     evm.push(r)?;
-    Ok((gas, 0))
+    Ok(())
 }
 
-pub fn sgt(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<(i64, i64)> {
-    let gas = 3;
-    let [a, b] = evm.popn()?;
+pub fn sgt(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<()> {
+    evm.gas.take(3)?;
+    let [a, b] = evm.peek()?;
     let f = lift(|[a, b]| {
         let key = |x| x ^ (ONE << 255);
         if key(a) > key(b) { ONE } else { ZERO }
     });
     let r = f([a, b]);
     evm.push(r)?;
-    Ok((gas, 0))
+    Ok(())
 }
 
-pub fn eq(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<(i64, i64)> {
-    let gas = 3;
-    let [a, b] = evm.popn()?;
+pub fn eq(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<()> {
+    evm.gas.take(3)?;
+    let [a, b] = evm.peek()?;
     let f = lift(|[a, b]| if a == b { ONE } else { ZERO });
     let r = f([a, b]);
     evm.push(r)?;
-    Ok((gas, 0))
+    Ok(())
 }
 
-pub fn iszero(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<(i64, i64)> {
-    let gas = 3;
-    let [x] = evm.popn()?;
+pub fn iszero(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<()> {
+    evm.gas.take(3)?;
+    let [x] = evm.peek()?;
     let f = lift(|[x]| if x.is_zero() { ONE } else { ZERO });
     let r = f([x]);
     evm.push(r)?;
-    Ok((gas, 0))
+    Ok(())
 }
 
-pub fn and(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<(i64, i64)> {
-    let gas = 3;
-    let [a, b] = evm.popn()?;
+pub fn and(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<()> {
+    evm.gas.take(3)?;
+    let [a, b] = evm.peek()?;
     let f = lift(|[a, b]| a & b);
     let r = f([a, b]);
     evm.push(r)?;
-    Ok((gas, 0))
+    Ok(())
 }
 
-pub fn or(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<(i64, i64)> {
-    let gas = 3;
-    let [a, b] = evm.popn()?;
+pub fn or(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<()> {
+    evm.gas.take(3)?;
+    let [a, b] = evm.peek()?;
     let f = lift(|[a, b]| a | b);
     let r = f([a, b]);
     evm.push(r)?;
-    Ok((gas, 0))
+    Ok(())
 }
 
-pub fn xor(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<(i64, i64)> {
-    let gas = 3;
-    let [a, b] = evm.popn()?;
+pub fn xor(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<()> {
+    evm.gas.take(3)?;
+    let [a, b] = evm.peek()?;
     let f = lift(|[a, b]| a ^ b);
     let r = f([a, b]);
     evm.push(r)?;
-    Ok((gas, 0))
+    Ok(())
 }
 
-pub fn not(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<(i64, i64)> {
-    let gas = 3;
-    let [x] = evm.popn()?;
+pub fn not(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<()> {
+    evm.gas.take(3)?;
+    let [x] = evm.peek()?;
     let f = lift(|[x]| !x);
     let r = f([x]);
     evm.push(r)?;
-    Ok((gas, 0))
+    Ok(())
 }
 
-pub fn byte(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<(i64, i64)> {
-    let gas = 3;
-    let [idx, int] = evm.popn()?;
+pub fn byte(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<()> {
+    evm.gas.take(3)?;
+    let [idx, int] = evm.peek()?;
     let byte = int
         .as_ref()
         .get(idx.as_usize())
         .copied()
         .unwrap_or_default();
     evm.push(Int::from(byte))?;
-    Ok((gas, 0))
+    Ok(())
 }
 
-pub fn shl(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<(i64, i64)> {
-    let gas = 3;
-    let [a, b] = evm.popn()?;
+pub fn shl(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<()> {
+    evm.gas.take(3)?;
+    let [a, b] = evm.peek()?;
     let f = lift(|[a, b]| a << b);
     let r = f([a, b]);
     evm.push(r)?;
-    Ok((gas, 0))
+    Ok(())
 }
 
-pub fn shr(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<(i64, i64)> {
-    let gas = 3;
-    let [a, b] = evm.popn()?;
+pub fn shr(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<()> {
+    evm.gas.take(3)?;
+    let [a, b] = evm.peek()?;
     let f = lift(|[a, b]| a >> b);
     let r = f([a, b]);
     evm.push(r)?;
-    Ok((gas, 0))
+    Ok(())
 }
 
-pub fn sar(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<(i64, i64)> {
-    let gas = 3;
-    let [shift, val] = evm.popn()?;
+pub fn sar(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<()> {
+    evm.gas.take(3)?;
+    let [shift, val] = evm.peek()?;
     let f = lift(|[shift, val]| val.arithmetic_shr(shift.saturating_to::<usize>()));
     let r = f([shift, val]);
     evm.push(r)?;
-    Ok((gas, 0))
+    Ok(())
 }
 
-pub fn clz(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<(i64, i64)> {
+pub fn clz(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<()> {
     use yaevmi_base::math::U256;
-    let gas = 3;
-    let [x] = evm.popn()?;
+    evm.gas.take(3)?;
+    let [x] = evm.peek()?;
     let f = lift(|[x]| U256::from(x.leading_zeros()));
     let r = f([x]);
     evm.push(r)?;
-    Ok((gas, 0))
+    Ok(())
 }
 
-pub fn hash(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<(i64, i64)> {
-    let gas = 3;
-    let [offset, size] = evm.popn()?;
+pub fn hash(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<()> {
+    evm.gas.take(3)?;
+    let [offset, size] = evm.peek()?;
     let (offset, size) = (offset.as_usize(), size.as_usize());
     let (data, _) = evm.mem_get(offset..offset + size)?;
     let hash = keccak256(data);
     evm.push(hash)?;
-    Ok((gas, 0))
+    Ok(())
 }
