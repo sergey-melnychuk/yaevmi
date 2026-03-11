@@ -7,7 +7,7 @@ use crate::{
 };
 
 pub fn pop(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<()> {
-    evm.gas.take(3)?;
+    evm.gas.take(2)?;
     let [_] = evm.peek()?;
     Ok(())
 }
@@ -41,7 +41,7 @@ pub fn sload(evm: &mut Evm, ctx: &Context, _: &Call, state: &mut dyn State) -> E
     evm.gas.take(100)?;
     let [key] = evm.peek()?;
     let acc = ctx.this;
-    if !state.warm_key(&acc, &key) {
+    if state.warm_key(&acc, &key) {
         evm.gas.take(2000)?;
     }
     let Some((val, _)) = state.get(&acc, &key) else {
@@ -120,7 +120,7 @@ pub fn sstore(evm: &mut Evm, ctx: &Context, _: &Call, state: &mut dyn State) -> 
         return Err(EvmYield::Fetch(crate::evm::Fetch::StateCell(acc, key)));
     };
     let (mut gas, refund) = sstore_gas(val, cur, org);
-    if !state.warm_key(&acc, &key) {
+    if state.warm_key(&acc, &key) {
         gas += 2100;
     }
     evm.gas.refund(refund)?;
@@ -132,7 +132,7 @@ pub fn sstore(evm: &mut Evm, ctx: &Context, _: &Call, state: &mut dyn State) -> 
 const JUMPDEST: u8 = 0x5B;
 
 pub fn jump(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<()> {
-    evm.gas.take(5)?;
+    evm.gas.take(8)?;
     let [dst] = evm.peek()?;
     let dst = dst.as_usize();
     let ok = evm
@@ -143,12 +143,13 @@ pub fn jump(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResul
     if !ok {
         return Err(EvmYield::Halt(HaltReason::BadJump(dst)));
     }
+    evm.gas.take(1)?; // JUMPDEST
     evm.pc = dst;
     Ok(())
 }
 
 pub fn jumpi(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<()> {
-    evm.gas.take(5)?;
+    evm.gas.take(10)?;
     let [val, dst] = evm.peek()?;
     if val.is_zero() {
         return Ok(());
@@ -162,26 +163,27 @@ pub fn jumpi(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResu
     if !ok {
         return Err(EvmYield::Halt(HaltReason::BadJump(dst)));
     }
+    evm.gas.take(1)?; // JUMPDEST
     evm.pc = dst;
     Ok(())
 }
 
 pub fn pc(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<()> {
-    evm.gas.take(0)?;
+    evm.gas.take(2)?;
     let pc = evm.pc + 1;
     evm.push(pc.into())?;
     Ok(())
 }
 
 pub fn msize(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<()> {
-    evm.gas.take(0)?;
+    evm.gas.take(2)?;
     let len = evm.memory.len();
     evm.push(len.into())?;
     Ok(())
 }
 
 pub fn gas(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<()> {
-    evm.gas.take(0)?;
+    evm.gas.take(2)?;
     let gas = evm.gas.remaining();
     evm.push((gas as usize).into())?;
     Ok(())

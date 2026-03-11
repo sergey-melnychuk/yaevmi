@@ -24,7 +24,7 @@ pub fn add(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult
 }
 
 pub fn mul(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<()> {
-    evm.gas.take(3)?;
+    evm.gas.take(5)?;
     let [a, b] = evm.peek()?;
     let f = lift(|[a, b]| a * b);
     let r = f([a, b]);
@@ -42,7 +42,7 @@ pub fn sub(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult
 }
 
 pub fn div(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<()> {
-    evm.gas.take(3)?;
+    evm.gas.take(5)?;
     let [a, b] = evm.peek()?;
     let f = lift(|[a, b]| a / b);
     let r = f([a, b]);
@@ -76,7 +76,7 @@ pub fn sdiv(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResul
 }
 
 pub fn r#mod(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<()> {
-    evm.gas.take(3)?;
+    evm.gas.take(5)?;
     let [a, b] = evm.peek()?;
     let f = lift(|[a, b]| a % b);
     let r = f([a, b]);
@@ -109,7 +109,7 @@ pub fn smod(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResul
 }
 
 pub fn addmod(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<()> {
-    evm.gas.take(3)?;
+    evm.gas.take(8)?;
     let [a, b, m] = evm.peek()?;
     let f = lift(|[a, b, m]| a.add_mod(b, m));
     let r = f([a, b, m]);
@@ -118,7 +118,7 @@ pub fn addmod(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmRes
 }
 
 pub fn mulmod(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<()> {
-    evm.gas.take(3)?;
+    evm.gas.take(8)?;
     let [a, b, m] = evm.peek()?;
     let f = lift(|[a, b, m]| a.mul_mod(b, m));
     let r = f([a, b, m]);
@@ -127,7 +127,7 @@ pub fn mulmod(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmRes
 }
 
 pub fn exp(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<()> {
-    evm.gas.take(3)?;
+    evm.gas.take(10)?;
     let [a, b] = evm.peek()?;
     let f = lift(|[a, b]| a.pow(b));
     let r = f([a, b]);
@@ -296,7 +296,7 @@ pub fn sar(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult
 
 pub fn clz(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<()> {
     use yaevmi_base::math::U256;
-    evm.gas.take(3)?;
+    evm.gas.take(5)?;
     let [x] = evm.peek()?;
     let f = lift(|[x]| U256::from(x.leading_zeros()));
     let r = f([x]);
@@ -305,7 +305,7 @@ pub fn clz(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult
 }
 
 pub fn hash(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<()> {
-    evm.gas.take(3)?;
+    evm.gas.take(30)?;
     let [offset, size] = evm.peek()?;
     let (offset, size) = (offset.as_usize(), size.as_usize());
     let (data, _) = evm.mem_get(offset..offset + size)?;

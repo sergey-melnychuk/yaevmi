@@ -5,12 +5,13 @@ use crate::{
 };
 
 pub fn push(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<()> {
-    evm.gas.take(3)?;
     let op = evm.code[evm.pc];
     let len = len(op);
     let int = if len == 0 {
+        evm.gas.take(2)?;
         Int::ZERO
     } else {
+        evm.gas.take(3)?;
         let lo = evm.pc + 1;
         let hi = evm.pc + 1 + len;
         if hi > evm.code.len() {
@@ -237,6 +238,7 @@ mod tests {
         let mut evm = Evm::new(head, vec![0x90], 1000); // SWAP1 needs 2, has 1
         evm.stack.push(int(1));
         let result = swap(&mut evm, &ctx(), &call(), &mut state());
+        eprintln!("RESULT: {result:?}");
         assert!(is_halt(result, HaltReason::StackUnderflow));
     }
 

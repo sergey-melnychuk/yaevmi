@@ -1,7 +1,11 @@
 use std::collections::{HashMap, HashSet};
 
-use yaevmi_base::{Acc, Int, dto::Head};
-use yaevmi_core::state::{Account, State};
+use yaevmi_base::{Acc, Int, dto::Head, math::lift};
+use yaevmi_core::{
+    state::{Account, State},
+    trace::{Event, Target},
+};
+use yaevmi_misc::buf::Buf;
 
 #[derive(Default)]
 struct Slot {
@@ -27,7 +31,7 @@ impl Default for AccountEntry {
     fn default() -> Self {
         Self::new(Account {
             value: Int::ZERO,
-            nonce: 0,
+            nonce: Int::ZERO,
             code: (vec![], Int::ZERO),
         })
     }
@@ -42,7 +46,8 @@ pub struct InMemoryState {
     created: Vec<Acc>,
     destroyed: Vec<Acc>,
     heads: HashMap<u64, Int>,
-    pub logs: Vec<(Vec<u8>, Vec<Int>)>,
+    pub logs: Vec<(Buf, Vec<Int>)>,
+    pub events: Vec<Event>,
 }
 
 impl InMemoryState {
@@ -56,6 +61,7 @@ impl InMemoryState {
             destroyed: vec![],
             heads: HashMap::new(),
             logs: vec![],
+            events: vec![],
         }
     }
 
@@ -85,9 +91,15 @@ impl InMemoryState {
 
 impl State for InMemoryState {
     // Storage: returns (current, original)
-    fn get(&self, acc: &Acc, key: &Int) -> Option<(Int, Int)> {
+    fn get(&mut self, acc: &Acc, key: &Int) -> Option<(Int, Int)> {
         let entry = self.accounts.get(acc)?;
-        entry.storage.get(key).map(|s| (s.current, s.original))
+        let (cur, org) = entry.storage.get(key).map(|s| (s.current, s.original))?;
+        self.emit(Event::Get(Target::Store {
+            acc: *acc,
+            key: *key,
+            val: cur,
+        }));
+        Some((cur, org))
     }
 
     fn put(&mut self, acc: &Acc, key: &Int, val: Int) -> Option<Int> {
@@ -95,6 +107,14 @@ impl State for InMemoryState {
         let slot = entry.storage.entry(*key).or_default();
         let prev = slot.current;
         slot.current = val;
+        self.emit(Event::Put(
+            Target::Store {
+                acc: *acc,
+                key: *key,
+                val: prev,
+            },
+            val,
+        ));
         Some(prev)
     }
 
@@ -110,48 +130,100 @@ impl State for InMemoryState {
         val
     }
 
-    // Transient storage (EIP-1153)
-    fn tget(&self, key: &Int) -> Option<Int> {
-        self.transient.get(key).copied()
+    fn tget(&mut self, key: &Int) -> Option<Int> {
+        let val = self.transient.get(key).copied();
+        self.emit(Event::Get(Target::Temp {
+            key: *key,
+            val: val.unwrap_or_default(),
+        }));
+        val
     }
 
     fn tput(&mut self, key: Int, val: Int) -> Option<Int> {
-        self.transient.insert(key, val)
+        let prev = self.transient.insert(key, val);
+        self.emit(Event::Put(
+            Target::Temp {
+                key,
+                val: prev.unwrap_or_default(),
+            },
+            val,
+        ));
+        prev
     }
 
     // Account mutations
-    fn inc_nonce(&mut self, acc: &Acc, by: u64) -> u64 {
-        let entry = self.accounts.entry(*acc).or_default();
-        eprintln!("DEBUG: inc nonce={}", entry.account.nonce); // TODO: FIXME: !!!
-        entry.account.nonce += by;
-        entry.account.nonce
+    fn inc_nonce(&mut self, acc: &Acc, by: Int) -> Int {
+        let (old, new) = {
+            let entry = self.accounts.entry(*acc).or_default();
+            let old = entry.account.nonce;
+            let f = lift(|[a, b]| a + b);
+            let new = f([old, by]);
+            entry.account.nonce = new;
+            (old, new)
+        };
+        self.emit(Event::Put(
+            Target::Nonce {
+                acc: *acc,
+                val: old,
+            },
+            new,
+        ));
+        new
     }
 
     fn set_value(&mut self, acc: &Acc, value: Int) -> Int {
-        let entry = self.accounts.entry(*acc).or_default();
-        let prev = entry.account.value;
-        entry.account.value = value;
+        let prev = {
+            let entry = self.accounts.entry(*acc).or_default();
+            let prev = entry.account.value;
+            entry.account.value = value;
+            prev
+        };
+        self.emit(Event::Put(
+            Target::Value {
+                acc: *acc,
+                val: prev,
+            },
+            value,
+        ));
         prev
+    }
+
+    fn set_auth(&mut self, _src: &Acc, _dst: &Acc) {
+        // TODO: insert EIP-7702 delegation
     }
 
     fn acc_mut(&mut self, acc: &Acc) -> &mut Account {
         &mut self.accounts.entry(*acc).or_default().account
     }
 
-    // Account queries
-    fn balance(&self, acc: &Acc) -> Option<Int> {
-        self.accounts.get(acc).map(|e| e.account.value)
+    fn balance(&mut self, acc: &Acc) -> Option<Int> {
+        let val = self.accounts.get(acc).map(|e| e.account.value);
+        self.emit(Event::Get(Target::Value {
+            acc: *acc,
+            val: val.unwrap_or_default(),
+        }));
+        val
     }
 
-    fn nonce(&self, acc: &Acc) -> Option<u64> {
-        self.accounts.get(acc).map(|e| e.account.nonce)
+    fn nonce(&mut self, acc: &Acc) -> Option<Int> {
+        let val = self.accounts.get(acc).map(|e| e.account.nonce);
+        self.emit(Event::Get(Target::Nonce {
+            acc: *acc,
+            val: val.unwrap_or_default(),
+        }));
+        val
     }
 
-    fn code(&self, acc: &Acc) -> Option<(Vec<u8>, Int)> {
-        self.accounts.get(acc).map(|e| e.account.code.clone())
+    fn code(&mut self, acc: &Acc) -> Option<(Vec<u8>, Int)> {
+        let (code, hash) = self.accounts.get(acc).map(|e| e.account.code.clone())?;
+        self.emit(Event::Get(Target::Code {
+            acc: *acc,
+            code: code.clone().into(),
+        }));
+        Some((code, hash))
     }
 
-    fn acc(&self, acc: &Acc) -> Option<Account> {
+    fn acc(&mut self, acc: &Acc) -> Option<Account> {
         self.accounts.get(acc).map(|e| Account {
             value: e.account.value,
             nonce: e.account.nonce,
@@ -159,24 +231,22 @@ impl State for InMemoryState {
         })
     }
 
-    // Access list / warmth
-    fn is_warm_acc(&self, acc: &Acc) -> bool {
-        self.warm_accs.contains(acc)
-    }
-
-    fn is_warm_key(&self, acc: &Acc, key: &Int) -> bool {
-        self.warm_keys.contains(&(*acc, *key))
-    }
-
     fn warm_acc(&mut self, acc: &Acc) -> bool {
-        !self.warm_accs.insert(*acc)
+        let cold = self.warm_accs.insert(*acc);
+        if cold {
+            self.emit(Event::WarmAcc(*acc));
+        }
+        cold
     }
 
     fn warm_key(&mut self, acc: &Acc, key: &Int) -> bool {
-        !self.warm_keys.insert((*acc, *key))
+        let cold = self.warm_keys.insert((*acc, *key));
+        if cold {
+            self.emit(Event::WarmKey(*acc, *key));
+        }
+        cold
     }
 
-    // Account lifecycle
     fn create(&mut self, acc: Acc, info: Account) {
         self.accounts.insert(acc, AccountEntry::new(info));
         self.created.push(acc);
@@ -195,7 +265,6 @@ impl State for InMemoryState {
         &self.destroyed
     }
 
-    // Block headers
     fn head(&self, number: u64) -> Option<Head> {
         self.heads.get(&number).map(|&hash| Head {
             number,
@@ -204,17 +273,21 @@ impl State for InMemoryState {
         })
     }
 
-    fn set_hash(&mut self, number: u64, hash: Int) {
+    fn hash(&mut self, number: u64, hash: Int) {
         self.heads.insert(number, hash);
     }
 
-    // EIP-7702 delegation
-    fn get_delegation(&mut self, _acc: &Acc) -> Option<Acc> {
-        None
+    fn auth(&self, _acc: &Acc) -> Option<Acc> {
+        None // TODO: lookup EIP-7702 delegation
     }
 
-    // Logs
-    fn log(&mut self, data: Vec<u8>, topics: Vec<Int>) {
+    fn log(&mut self, data: Buf, topics: Vec<Int>) {
+        self.emit(Event::Log(topics.clone(), data.clone()));
         self.logs.push((data, topics));
+    }
+
+    fn emit(&mut self, event: Event) -> usize {
+        self.events.push(event);
+        self.events.len()
     }
 }

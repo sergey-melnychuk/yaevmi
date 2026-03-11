@@ -1,11 +1,11 @@
-pub mod fixture;
+pub mod setup;
 pub mod state;
 
-use fixture::{PostEntry, TestCase};
+use setup::{PostEntry, TestCase};
 use state::InMemoryState;
 use yaevmi_base::{Acc, Int, dto::Head};
 use yaevmi_core::{
-    Call,
+    Call, Tx,
     exe::{CallResult, Executor},
     state::{Account, Chain, State},
 };
@@ -34,7 +34,7 @@ impl Chain for NoChain {
     async fn head(&self, number: u64) -> eyre::Result<Head> {
         eyre::bail!("NoChain: unexpected Fetch::BlockHash({number})")
     }
-    async fn block(&self, number: u64) -> eyre::Result<(Head, Vec<yaevmi_base::dto::Tx>)> {
+    async fn block(&self, number: u64) -> eyre::Result<(Head, Vec<Tx>)> {
         eyre::bail!("NoChain: block({number}) not available")
     }
 }
@@ -48,7 +48,7 @@ pub fn build_state(tc: &TestCase) -> InMemoryState {
         let code_hash = keccak256(&code);
         let account = Account {
             value: pre.balance,
-            nonce: pre.nonce.as_u64(),
+            nonce: pre.nonce,
             code: (code, code_hash),
         };
         state.insert_account(*addr, account);
@@ -79,7 +79,7 @@ pub fn build_head(tc: &TestCase) -> Head {
 }
 
 /// Build a Call for one (data_idx, gas_idx, value_idx) combination.
-pub fn build_call(tc: &TestCase, idx: &fixture::Indexes) -> Call {
+pub fn build_call(tc: &TestCase, idx: &setup::Indexes) -> Call {
     Call {
         by: tc.transaction.sender,
         to: tc.transaction.to.unwrap_or(Acc::ZERO),
@@ -122,7 +122,7 @@ pub async fn run_entry(tc: &TestCase, entry: &PostEntry) -> eyre::Result<()> {
     };
 
     // 1. Increment sender nonce
-    state.inc_nonce(&sender, 1);
+    state.inc_nonce(&sender, Int::ONE);
 
     // 2. Upfront deduction: gas_limit * max_fee + value
     let upfront = U256::from(gas_limit) * max_fee + i2u(value);
@@ -172,19 +172,19 @@ pub async fn run_entry(tc: &TestCase, entry: &PostEntry) -> eyre::Result<()> {
         let actual_balance = state.balance(addr).unwrap_or(Int::ZERO);
         eyre::ensure!(
             actual_balance == balance,
-            "balance mismatch for {addr:?}: got {actual_balance:?}, want {balance:?}"
+            "\n for {addr:?} balance:\n got {actual_balance:?}\nwant {balance:?}"
         );
-        let actual_nonce = state.nonce(addr).unwrap_or(0);
-        let expected_nonce = expected.nonce.as_u64();
+        let actual_nonce = state.nonce(addr).unwrap_or(Int::ZERO);
         eyre::ensure!(
-            actual_nonce == expected_nonce,
-            "nonce mismatch for {addr:?}: got {actual_nonce}, want {expected_nonce}"
+            actual_nonce == expected.nonce,
+            "\n for {addr:?} nonce:\n got {actual_nonce}\nwant {}",
+            expected.nonce
         );
         for (key, want) in &expected.storage {
             let got = state.storage(addr, key).unwrap_or(Int::ZERO);
             eyre::ensure!(
                 got == *want,
-                "storage mismatch for {addr:?}[{key:?}]: got {got:?}, want {want:?}"
+                "\n for {addr:?}[{key:?}]:\n got {got:?}\nwant {want:?}"
             );
         }
     }
@@ -213,7 +213,7 @@ mod tests {
             env!("CARGO_MANIFEST_DIR"),
             "/tests/GeneralStateTests/stStackTests/shallowStack.json"
         );
-        let file: fixture::TestFile =
+        let file: setup::TestFile =
             serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
         for (name, tc) in &file {
             for result in run_case(tc, "Cancun").await {
@@ -231,7 +231,6 @@ mod tests {
         let root = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/GeneralStateTests");
         let mut total = 0usize;
         let mut passed = 0usize;
-        let mut failures: Vec<String> = vec![];
 
         for category in std::fs::read_dir(root).expect("GeneralStateTests not found") {
             let category = category.unwrap().path();
@@ -244,22 +243,24 @@ mod tests {
                     continue;
                 }
                 let src = std::fs::read_to_string(&file_path).unwrap();
-                let file: fixture::TestFile = match serde_json::from_str(&src) {
+                let file: setup::TestFile = match serde_json::from_str(&src) {
                     Ok(f) => f,
                     Err(e) => {
-                        failures.push(format!("{}: parse error: {e}", file_path.display()));
+                        println!("ERROR: {}: parse error: {e}", file_path.display());
                         continue;
                     }
                 };
                 for (name, tc) in &file {
-                    eprintln!("FILE: {name}");
+                    println!("---\nTEST: {name}");
                     for result in run_case(tc, FORK).await {
                         total += 1;
                         match result {
-                            Ok(()) => passed += 1,
+                            Ok(()) => {
+                                println!("PASS: {name}");
+                                passed += 1;
+                            }
                             Err(e) => {
-                                failures.push(format!("{name}: {e}"));
-                                break;
+                                println!("FAIL: {name}: {e}");
                             }
                         }
                     }
@@ -269,13 +270,6 @@ mod tests {
 
         println!("\n=== GeneralStateTests/{FORK} ===");
         println!("passed: {passed}/{total}");
-        for f in &failures {
-            println!("  FAIL: {f}");
-        }
-        assert!(
-            failures.is_empty(),
-            "{} failures out of {total} (run with --nocapture to see details)",
-            failures.len()
-        );
+        assert!(passed == total, "GeneralStateTests/{FORK} failed");
     }
 }

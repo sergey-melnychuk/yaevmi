@@ -106,13 +106,18 @@ impl Gas {
 
     pub fn take(&mut self, gas: i64) -> EvmResult<i64> {
         let rem = self.remaining();
-        if gas >= rem {
+        if gas <= rem {
             self.spent += gas;
             Ok(rem - gas)
         } else {
             self.spent += rem;
             Err(EvmYield::Halt(HaltReason::OutOfGas))
         }
+    }
+
+    pub fn drain(&mut self) {
+        self.spent = self.limit;
+        self.refund = 0;
     }
 }
 
@@ -214,7 +219,7 @@ impl Evm {
         }
         let cost = if end > self.memory.len() {
             if end > cap {
-                self.memory.reserve(cap - end);
+                self.memory.reserve(end - cap);
             }
             self.memory.resize(end, 0);
             // TODO: calculate memory expansion costs
@@ -248,7 +253,7 @@ impl Evm {
         let Some(op) = self.code.get(self.pc).copied() else {
             return Ok(StepResult::End);
         };
-        let (_name, f) = OPS[op as usize];
+        let (_, f) = OPS[op as usize];
         let result = f(self, ctx, call, state);
         self.pc += 1;
         result.map(|_| StepResult::Ok).or_else(|evm_yield| {

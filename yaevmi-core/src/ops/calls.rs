@@ -106,7 +106,6 @@ pub fn delegatecall(evm: &mut Evm, ctx: &Context, _: &Call, _: &mut dyn State) -
     let [
         gas,
         address,
-        value,
         args_offset,
         args_size,
         ret_offset,
@@ -122,7 +121,7 @@ pub fn delegatecall(evm: &mut Evm, ctx: &Context, _: &Call, _: &mut dyn State) -
         by: ctx.this,
         to: address,
         gas: gas.as_u64(),
-        eth: value,
+        eth: Int::ZERO,
         data: data.to_vec(),
         auth: vec![],
         nonce: None,
@@ -190,7 +189,8 @@ pub fn revert(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmRes
 }
 
 // TODO: 0xFF SELFDESTRUCT
-pub fn selfdestruct(_evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<()> {
+pub fn selfdestruct(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<()> {
+    evm.gas.take(5_000)?;
     // TODO: transfer value, mark deleted
     Ok(())
 }

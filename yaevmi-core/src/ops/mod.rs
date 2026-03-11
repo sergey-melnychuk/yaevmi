@@ -295,10 +295,13 @@ pub const OPS: [(&str, Handler); 256] = [
 
 #[cfg(test)]
 pub mod tests {
+    use yaevmi_misc::buf::Buf;
+
     use crate::{
         Acc, Call, Head, Int,
         evm::Context,
         state::{Account, State},
+        trace::Event,
     };
 
     pub fn ctx() -> Context {
@@ -332,14 +335,14 @@ pub mod tests {
         fn default() -> Self {
             Self(Account {
                 value: Int::ZERO,
-                nonce: 0,
+                nonce: Int::ZERO,
                 code: (vec![], Int::ZERO),
             })
         }
     }
 
     impl State for Empty {
-        fn get(&self, _: &Acc, _: &Int) -> Option<(Int, Int)> {
+        fn get(&mut self, _: &Acc, _: &Int) -> Option<(Int, Int)> {
             None
         }
         fn put(&mut self, _: &Acc, _: &Int, _: Int) -> Option<Int> {
@@ -348,14 +351,14 @@ pub mod tests {
         fn init(&mut self, _: &Acc, _: &Int, _: Int) -> Int {
             Int::ZERO
         }
-        fn tget(&self, _: &Int) -> Option<Int> {
+        fn tget(&mut self, _: &Int) -> Option<Int> {
             None
         }
         fn tput(&mut self, _: Int, _: Int) -> Option<Int> {
             None
         }
-        fn inc_nonce(&mut self, _: &Acc, _: u64) -> u64 {
-            0
+        fn inc_nonce(&mut self, _: &Acc, _: Int) -> Int {
+            Int::ZERO
         }
         fn set_value(&mut self, _: &Acc, _: Int) -> Int {
             Int::ZERO
@@ -363,23 +366,17 @@ pub mod tests {
         fn acc_mut(&mut self, _: &Acc) -> &mut Account {
             &mut self.0
         }
-        fn balance(&self, _: &Acc) -> Option<Int> {
+        fn balance(&mut self, _: &Acc) -> Option<Int> {
             None
         }
-        fn nonce(&self, _: &Acc) -> Option<u64> {
+        fn nonce(&mut self, _: &Acc) -> Option<Int> {
             None
         }
-        fn code(&self, _: &Acc) -> Option<(Vec<u8>, Int)> {
+        fn code(&mut self, _: &Acc) -> Option<(Vec<u8>, Int)> {
             None
         }
-        fn acc(&self, _: &Acc) -> Option<Account> {
+        fn acc(&mut self, _: &Acc) -> Option<Account> {
             None
-        }
-        fn is_warm_acc(&self, _: &Acc) -> bool {
-            false
-        }
-        fn is_warm_key(&self, _: &Acc, _: &Int) -> bool {
-            false
         }
         fn warm_acc(&mut self, _: &Acc) -> bool {
             false
@@ -402,13 +399,19 @@ pub mod tests {
         fn head(&self, _: u64) -> Option<Head> {
             None
         }
-        fn set_hash(&mut self, _: u64, _: Int) {
+        fn hash(&mut self, _: u64, _: Int) {
             ()
         }
-        fn get_delegation(&mut self, _: &Acc) -> Option<Acc> {
+        fn auth(&self, _: &Acc) -> Option<Acc> {
             None
         }
-        fn log(&mut self, _: Vec<u8>, _: Vec<Int>) {
+        fn log(&mut self, _: Buf, _: Vec<Int>) {
+            ()
+        }
+        fn emit(&mut self, _: Event) -> usize {
+            0
+        }
+        fn set_auth(&mut self, _: &Acc, _: &Acc) {
             ()
         }
     }

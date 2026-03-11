@@ -13,6 +13,12 @@ impl Buf {
     }
 }
 
+impl From<Vec<u8>> for Buf {
+    fn from(value: Vec<u8>) -> Self {
+        Self(value)
+    }
+}
+
 impl fmt::Debug for Buf {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str("0x")?;

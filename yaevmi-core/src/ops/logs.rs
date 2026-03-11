@@ -12,6 +12,8 @@ pub fn log(evm: &mut Evm, _: &Context, _: &Call, state: &mut dyn State) -> EvmRe
     let [offset, size] = evm.peek()?;
     let (offset, size) = (offset.as_usize(), size.as_usize());
 
+    // TODO: FIXME: "attempt to multiply with overflow"
+    // (int overflow for size = usize::MAX == u64::MAX)
     let gas = 375 + 375 * n + 8 * size;
     evm.gas.take(gas as i64)?;
 
@@ -22,7 +24,7 @@ pub fn log(evm: &mut Evm, _: &Context, _: &Call, state: &mut dyn State) -> EvmRe
     }
     let (data, _) = evm.mem_get(offset..offset + size)?;
 
-    state.log(data.to_vec(), topics);
+    state.log(data.to_vec().into(), topics);
     evm.pull()?;
     Ok(())
 }

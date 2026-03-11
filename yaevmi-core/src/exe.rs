@@ -6,6 +6,8 @@ use crate::evm::{CallMode, Context, Evm, Gas, StepResult};
 use crate::state::{Chain, State, fetch};
 use crate::{Acc, Call, Error, Int, Result};
 
+const MAX_CALL_DEPTH: usize = 1024;
+
 pub enum CallResult {
     Done { status: Int, ret: Vec<u8>, gas: Gas },
     Created(Acc, Gas),
@@ -55,20 +57,19 @@ impl Executor {
                 match call_result {
                     CallResult::Done { status, ret, gas } => {
                         this.evm.stack.push(status);
-                        if !status.is_zero() && !ret.is_empty() {
-                            match this.evm.mem_put(target, &ret) {
-                                Ok(gas) => gas,
-                                Err(_reason) => {
-                                    target = 0..0;
-                                    result = Some(CallResult::Done {
-                                        status: Int::ZERO,
-                                        ret: vec![],
-                                        gas: this.evm.gas,
-                                    });
-                                    self.callstack.pop();
-                                    continue;
-                                }
-                            };
+                        if !status.is_zero()
+                            && !ret.is_empty()
+                            && this.evm.mem_put(target, &ret).is_err()
+                        {
+                            // TODO: handle revert
+                            target = 0..0;
+                            result = Some(CallResult::Done {
+                                status: Int::ZERO,
+                                ret: vec![],
+                                gas: this.evm.gas,
+                            });
+                            self.callstack.pop();
+                            continue;
                         }
                         this.evm.gas.spent += gas.spent;
                         this.evm.gas.refund += gas.refund;
@@ -90,6 +91,16 @@ impl Executor {
                 StepResult::Call(call, mode) => {
                     target = mode.range();
                     let frame = prepare(head, call, mode, Some(&this.ctx), state, chain).await?;
+                    if frame.ctx.depth > MAX_CALL_DEPTH {
+                        this.evm.gas.drain();
+                        result = Some(CallResult::Done {
+                            status: Int::ZERO,
+                            ret: vec![],
+                            gas: this.evm.gas,
+                        });
+                        self.callstack.pop();
+                        continue;
+                    }
                     self.callstack.push(frame);
                 }
                 StepResult::Return(ret) => {
@@ -114,16 +125,12 @@ impl Executor {
                     self.callstack.pop();
                 }
                 StepResult::Halt(_reason) => {
-                    // Halts (exceptions) consume all remaining gas — no refund
-                    let gas = Gas {
-                        spent: this.evm.gas.limit,
-                        refund: 0,
-                        ..this.evm.gas
-                    };
+                    // TODO: handle revert!
+                    this.evm.gas.drain();
                     result = Some(CallResult::Done {
                         status: Int::ZERO,
                         ret: vec![],
-                        gas,
+                        gas: this.evm.gas,
                     });
                     self.callstack.pop();
                 }
