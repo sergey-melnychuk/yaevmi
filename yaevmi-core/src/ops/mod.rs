@@ -378,6 +378,12 @@ pub mod tests {
         fn acc(&mut self, _: &Acc) -> Option<Account> {
             None
         }
+        fn is_cold_acc(&self, _: &Acc) -> bool {
+            true
+        }
+        fn is_cold_key(&self, _: &Acc, _: &Int) -> bool {
+            true
+        }
         fn warm_acc(&mut self, _: &Acc) -> bool {
             false
         }

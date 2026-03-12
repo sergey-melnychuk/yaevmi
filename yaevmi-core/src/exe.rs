@@ -111,6 +111,7 @@ impl Executor {
 
             match this.evm.step(&this.ctx, &this.call, state)? {
                 StepResult::Ok => {
+                    this.evm.apply(state);
                     this.evm.pc += 1;
                     continue;
                 }
@@ -154,7 +155,7 @@ impl Executor {
 
                         // Collision check: existing nonce or code at derived address
                         let existing_nonce = state.nonce(&addr).unwrap_or(Int::ZERO);
-                        let has_code = state.code(&addr).map_or(false, |(c, _)| !c.0.is_empty());
+                        let has_code = state.code(&addr).is_some_and(|(c, _)| !c.0.is_empty());
                         if !existing_nonce.is_zero() || has_code {
                             state.revert_to(checkpoint);
                             let _ = this.evm.push(Int::ZERO);
@@ -279,7 +280,10 @@ impl Executor {
                     });
                     self.callstack.pop();
                 }
-                StepResult::Fetch(f) => fetch(f, state, chain).await?,
+                StepResult::Fetch(f) => {
+                    fetch(f, state, chain).await?;
+                    this.evm.reset();
+                }
             }
         }
 

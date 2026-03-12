@@ -23,15 +23,14 @@ pub fn log(evm: &mut Evm, _: &Context, _: &Call, state: &mut dyn State) -> EvmRe
     }
 
     let gas = 375 + 375 * n + 8 * size;
-    evm.gas.take(gas as i64)?;
+    evm.gas_charge(gas as i64)?;
 
     let (data, _) = evm.mem_get(offset, size)?;
     let data = data.to_vec();
 
     let topics = evm.stack.iter().rev().skip(2).take(n).cloned().collect();
 
-    evm.pop = total;
+    evm.pending_stack_pops = total;
     state.log(data.into(), topics);
-    evm.pull()?;
     Ok(())
 }

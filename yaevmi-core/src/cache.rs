@@ -255,6 +255,14 @@ impl State for Cache {
         })
     }
 
+    fn is_cold_acc(&self, acc: &Acc) -> bool {
+        !self.warm_accs.contains(acc)
+    }
+
+    fn is_cold_key(&self, acc: &Acc, key: &Int) -> bool {
+        !self.warm_keys.contains(&(*acc, *key))
+    }
+
     fn warm_acc(&mut self, acc: &Acc) -> bool {
         let cold = self.warm_accs.insert(*acc);
         if cold {

@@ -104,7 +104,7 @@ impl Gas {
         }
     }
 
-    pub fn take(&mut self, gas: i64) -> EvmResult<i64> {
+    pub fn charge(&mut self, gas: i64) -> EvmResult<i64> {
         let rem = self.remaining();
         if rem >= gas {
             self.spent += gas;
@@ -147,8 +147,14 @@ pub struct Evm {
     pub code: Vec<u8>,
     pub head: Head,
     pub ret: Vec<u8>,
-    pub(crate) pop: usize,
-    mem_cost: i64,
+
+    pub(crate) pending_stack_pops: usize,
+    pub(crate) pending_stack_push: Vec<Int>,
+    pub(crate) pending_gas_charge: i64,
+    pub(crate) pending_gas_refund: i64,
+    pub(crate) pending_acc_warmup: Vec<Acc>,
+    pub(crate) pending_key_warmup: Vec<(Acc, Int)>,
+    pub(crate) pending_mem_stores: Vec<(usize, usize, Vec<u8>)>,
 }
 
 impl Evm {
@@ -164,8 +170,13 @@ impl Evm {
             code,
             head,
             ret: Vec::new(),
-            pop: 0,
-            mem_cost: 0,
+            pending_stack_pops: 0,
+            pending_stack_push: Vec::new(),
+            pending_gas_charge: 0,
+            pending_gas_refund: 0,
+            pending_mem_stores: Vec::new(),
+            pending_acc_warmup: Vec::new(),
+            pending_key_warmup: Vec::new(),
         }
     }
 
@@ -186,51 +197,114 @@ impl Evm {
         for (slot, value) in ret.iter_mut().zip(self.stack.iter().rev()) {
             *slot = *value;
         }
-        self.pop = N;
+        self.pending_stack_pops = N;
         Ok(ret)
     }
 
-    pub fn pull(&mut self) -> EvmResult<()> {
-        if self.stack.len() < self.pop {
-            return Err(EvmYield::Halt(HaltReason::StackUnderflow));
-        }
-        for _ in 0..self.pop {
+    pub fn apply(&mut self, state: &mut impl State) {
+        for _ in 0..self.pending_stack_pops {
             let _ = self.stack.pop();
         }
-        self.pop = 0;
-        Ok(())
+        self.pending_stack_pops = 0;
+
+        for int in self.pending_stack_push.drain(..) {
+            self.stack.push(int);
+        }
+        assert!(self.pending_stack_push.is_empty());
+
+        self.gas.spent += self.pending_gas_charge;
+        self.pending_gas_charge = 0;
+
+        self.gas.refund += self.pending_gas_refund;
+        self.pending_gas_refund = 0;
+
+        for acc in self.pending_acc_warmup.drain(..) {
+            state.warm_acc(&acc);
+        }
+        assert!(self.pending_acc_warmup.is_empty());
+
+        for (acc, key) in self.pending_key_warmup.drain(..) {
+            state.warm_key(&acc, &key);
+        }
+        assert!(self.pending_key_warmup.is_empty());
+
+        let pending_mem_stores = std::mem::take(&mut self.pending_mem_stores);
+        for (offset, size, source) in pending_mem_stores {
+            self.mem_store(offset, size, source);
+        }
+    }
+
+    pub fn reset(&mut self) {
+        self.pending_stack_pops = 0;
+        self.pending_stack_push.clear();
+        self.pending_gas_charge = 0;
+        self.pending_gas_refund = 0;
+        self.pending_mem_stores.clear();
+        self.pending_acc_warmup.clear();
+        self.pending_key_warmup.clear();
     }
 
     pub fn push(&mut self, int: Int) -> EvmResult<()> {
-        self.pull()?;
         if self.stack.len() >= Self::STACK_SIZE_LIMIT {
             return Err(EvmYield::Halt(HaltReason::StackOverflow));
         }
-        self.stack.push(int);
+        self.pending_stack_push.push(int);
         Ok(())
     }
 
-    pub fn mem_expand(&mut self, offset: usize, size: usize) -> EvmResult<()> {
+    pub fn warm_acc(&mut self, acc: &Acc) {
+        self.pending_acc_warmup.push(*acc);
+    }
+
+    pub fn warm_key(&mut self, acc: &Acc, key: &Int) {
+        self.pending_key_warmup.push((*acc, *key));
+    }
+
+    pub fn gas_charge(&mut self, gas: i64) -> EvmResult<()> {
+        if gas > self.gas.remaining() {
+            return Err(EvmYield::Halt(HaltReason::OutOfGas));
+        }
+        self.pending_gas_charge += gas;
+        Ok(())
+    }
+
+    pub fn gas_refund(&mut self, gas: i64) -> EvmResult<()> {
+        if self.gas.remaining() + self.gas.refund + gas < 0 {
+            return Err(EvmYield::Halt(HaltReason::OutOfGas));
+        }
+        self.pending_gas_refund += gas;
+        Ok(())
+    }
+
+    fn mem_expand(&mut self, offset: usize, size: usize) -> EvmResult<()> {
         mem_check(offset, size)?;
         let end = offset + size;
-        if end > Evm::MEMORY_SIZE_LIMIT {
-            return Err(EvmYield::Halt(HaltReason::OutOfMemory));
-        }
-        if end > self.memory.len() {
+        let len = self.memory.len();
+        if end > len {
             self.memory.resize(end, 0);
+
+            let words = len.div_ceil(32) as i64;
+            let old_cost = words * words / 512 + 3 * words;
+
             let words = end.div_ceil(32) as i64;
             let new_cost = words * words / 512 + 3 * words;
-            let cost = new_cost - self.mem_cost;
-            self.mem_cost = new_cost;
-            self.gas.take(cost)?;
+
+            let cost = new_cost - old_cost;
+            self.gas_charge(cost)?;
         }
         Ok(())
+    }
+
+    fn mem_store(&mut self, offset: usize, size: usize, source: Vec<u8>) {
+        let _ = self.mem_expand(offset, size);
+        let copy_len = source.len().min(size);
+        self.memory[offset..offset + copy_len].copy_from_slice(&source[..copy_len]);
     }
 
     pub fn mem_put(&mut self, offset: usize, size: usize, source: &[u8]) -> EvmResult<()> {
-        self.mem_expand(offset, size)?;
-        let copy_len = source.len().min(size);
-        self.memory[offset..offset + copy_len].copy_from_slice(&source[..copy_len]);
+        mem_check(offset, size)?;
+        self.pending_mem_stores
+            .push((offset, size, source.to_vec()));
         Ok(())
     }
 

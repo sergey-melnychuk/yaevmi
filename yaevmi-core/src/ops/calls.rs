@@ -4,31 +4,33 @@ use yaevmi_misc::keccak256;
 use crate::{
     Call,
     aux::{create_address, create2_address},
-    evm::{CallMode, Context, Evm, EvmResult, EvmYield},
+    evm::{self, CallMode, Context, Evm, EvmResult, EvmYield, Fetch},
     state::State,
 };
 
 /// Allocate gas for a child frame per EIP-150 (63/64 rule).
-fn child_gas(evm: &Evm) -> u64 {
+fn sub_call_gas(evm: &Evm) -> u64 {
     let remaining = evm.gas.remaining().max(0) as u64;
     remaining - remaining / 64
 }
 
 pub fn create(evm: &mut Evm, ctx: &Context, _: &Call, state: &mut dyn State) -> EvmResult<()> {
-    evm.gas.take(32_000)?;
+    evm.gas_charge(32_000)?;
     let [value, offset, size] = evm.peek()?;
     let (offset, size) = (offset.as_usize(), size.as_usize());
-    evm.mem_expand(offset, size)?;
+    evm::mem_check(offset, size)?;
     let initcode_cost = 2 * (size as i64 + 31) / 32;
-    evm.gas.take(initcode_cost)?;
+    evm.gas_charge(initcode_cost)?;
 
-    let nonce = state.nonce(&ctx.this).unwrap_or(Int::ZERO).as_u64();
+    let Some(nonce) = state.nonce(&ctx.this).map(|x| x.as_u64()) else {
+        return Err(EvmYield::Fetch(Fetch::Nonce(ctx.this)));
+    };
     let address = create_address(&ctx.this, nonce);
 
     let (data, _pad) = evm.mem_get(offset, size)?;
     let data: Vec<u8> = data.to_vec();
-    let gas = child_gas(evm);
-    evm.gas.take(gas as i64)?;
+    let gas = sub_call_gas(evm);
+    evm.gas_charge(gas as i64)?;
 
     let call = Call {
         by: ctx.this,
@@ -57,18 +59,27 @@ pub fn call(evm: &mut Evm, ctx: &Context, _: &Call, state: &mut dyn State) -> Ev
     let (ret_offset, ret_size) = (ret_offset.as_usize(), ret_size.as_usize());
     let address: Acc = address.to();
 
+    if state.acc(&ctx.this).is_none() {
+        return Err(EvmYield::Fetch(Fetch::Account(ctx.this)));
+    };
+
     // EIP-2929: warm/cold address access
-    let access_cost: i64 = if state.warm_acc(&address) { 2600 } else { 100 };
-    evm.gas.take(access_cost)?;
+    let access_cost: i64 = if state.is_cold_acc(&address) {
+        evm.warm_acc(&address);
+        2600
+    } else {
+        100
+    };
+    evm.gas_charge(access_cost)?;
 
     // Memory expansion for both args and return regions
-    evm.mem_expand(args_offset, args_size)?;
-    evm.mem_expand(ret_offset, ret_size)?;
+    evm::mem_check(args_offset, args_size)?;
+    evm::mem_check(ret_offset, ret_size)?;
 
     // Value transfer cost
     let has_value = !value.is_zero();
     if has_value {
-        evm.gas.take(9000)?;
+        evm.gas_charge(9000)?;
     }
 
     // New account cost (sending value to dead account per EIP-161)
@@ -77,14 +88,14 @@ pub fn call(evm: &mut Evm, ctx: &Context, _: &Call, state: &mut dyn State) -> Ev
         .map(|a| a.value.is_zero() && a.nonce.is_zero() && a.code.0.0.is_empty())
         .unwrap_or(true);
     if has_value && is_empty {
-        evm.gas.take(25000)?;
+        evm.gas_charge(25000)?;
     }
 
     // 63/64 rule: cap the gas arg at available_gas * 63/64
     let available = evm.gas.remaining().max(0) as u64;
     let max_child = available - available / 64;
     let mut gas = gas_arg.as_u64().min(max_child);
-    evm.gas.take(gas as i64)?;
+    evm.gas_charge(gas as i64)?;
 
     // Gas stipend: add 2300 to child when sending value
     if has_value {
@@ -120,21 +131,30 @@ pub fn callcode(evm: &mut Evm, ctx: &Context, _: &Call, state: &mut dyn State) -
     let (ret_offset, ret_size) = (ret_offset.as_usize(), ret_size.as_usize());
     let address: Acc = address.to();
 
-    let access_cost: i64 = if state.warm_acc(&address) { 2600 } else { 100 };
-    evm.gas.take(access_cost)?;
+    if state.acc(&address).is_none() {
+        return Err(EvmYield::Fetch(Fetch::Account(address)));
+    };
 
-    evm.mem_expand(args_offset, args_size)?;
-    evm.mem_expand(ret_offset, ret_size)?;
+    let access_cost: i64 = if state.is_cold_acc(&address) {
+        evm.warm_acc(&address);
+        2600
+    } else {
+        100
+    };
+    evm.gas_charge(access_cost)?;
+
+    evm::mem_check(args_offset, args_size)?;
+    evm::mem_check(ret_offset, ret_size)?;
 
     let has_value = !value.is_zero();
     if has_value {
-        evm.gas.take(9000)?;
+        evm.gas_charge(9000)?;
     }
 
     let available = evm.gas.remaining().max(0) as u64;
     let max_child = available - available / 64;
     let mut gas = gas_arg.as_u64().min(max_child);
-    evm.gas.take(gas as i64)?;
+    evm.gas_charge(gas as i64)?;
 
     if has_value {
         gas += 2300;
@@ -184,16 +204,25 @@ pub fn delegatecall(
     let (ret_offset, ret_size) = (ret_offset.as_usize(), ret_size.as_usize());
     let address: Acc = address.to();
 
-    let access_cost: i64 = if state.warm_acc(&address) { 2600 } else { 100 };
-    evm.gas.take(access_cost)?;
+    if state.acc(&address).is_none() {
+        return Err(EvmYield::Fetch(Fetch::Account(address)));
+    };
 
-    evm.mem_expand(args_offset, args_size)?;
-    evm.mem_expand(ret_offset, ret_size)?;
+    let access_cost: i64 = if state.is_cold_acc(&address) {
+        evm.warm_acc(&address);
+        2600
+    } else {
+        100
+    };
+    evm.gas_charge(access_cost)?;
+
+    evm::mem_check(args_offset, args_size)?;
+    evm::mem_check(ret_offset, ret_size)?;
 
     let available = evm.gas.remaining().max(0) as u64;
     let max_child = available - available / 64;
     let gas = gas_arg.as_u64().min(max_child);
-    evm.gas.take(gas as i64)?;
+    evm.gas_charge(gas as i64)?;
 
     let (data, _pad) = evm.mem_get(args_offset, args_size)?;
 
@@ -214,21 +243,21 @@ pub fn delegatecall(
 }
 
 pub fn create2(evm: &mut Evm, ctx: &Context, _: &Call, _: &mut dyn State) -> EvmResult<()> {
-    evm.gas.take(32_000)?;
+    evm.gas_charge(32_000)?;
     let [value, offset, size, salt] = evm.peek()?;
     let (offset, size) = (offset.as_usize(), size.as_usize());
-    evm.mem_expand(offset, size)?;
+    evm::mem_check(offset, size)?;
     // EIP-3860 initcode word cost (2) + CREATE2 hash word cost (6) = 8 per word
     let word_cost = 8 * (size as i64 + 31) / 32;
-    evm.gas.take(word_cost)?;
+    evm.gas_charge(word_cost)?;
 
     let (data, _pad) = evm.mem_get(offset, size)?;
     let data: Vec<u8> = data.to_vec();
     let init_code_hash = Int::from(keccak256(&data).as_ref());
     let address = create2_address(&ctx.this, &salt, &init_code_hash);
 
-    let gas = child_gas(evm);
-    evm.gas.take(gas as i64)?;
+    let gas = sub_call_gas(evm);
+    evm.gas_charge(gas as i64)?;
 
     let call = Call {
         by: ctx.this,
@@ -256,16 +285,25 @@ pub fn staticcall(evm: &mut Evm, ctx: &Context, _: &Call, state: &mut dyn State)
     let (ret_offset, ret_size) = (ret_offset.as_usize(), ret_size.as_usize());
     let address: Acc = address.to();
 
-    let access_cost: i64 = if state.warm_acc(&address) { 2600 } else { 100 };
-    evm.gas.take(access_cost)?;
+    if state.acc(&address).is_none() {
+        return Err(EvmYield::Fetch(Fetch::Account(address)));
+    };
 
-    evm.mem_expand(args_offset, args_size)?;
-    evm.mem_expand(ret_offset, ret_size)?;
+    let access_cost: i64 = if state.is_cold_acc(&address) {
+        evm.warm_acc(&address);
+        2600
+    } else {
+        100
+    };
+    evm.gas_charge(access_cost)?;
+
+    evm::mem_check(args_offset, args_size)?;
+    evm::mem_check(ret_offset, ret_size)?;
 
     let available = evm.gas.remaining().max(0) as u64;
     let max_child = available - available / 64;
     let gas = gas_arg.as_u64().min(max_child);
-    evm.gas.take(gas as i64)?;
+    evm.gas_charge(gas as i64)?;
 
     let (data, _pad) = evm.mem_get(args_offset, args_size)?;
 
@@ -292,7 +330,7 @@ pub fn revert(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmRes
 
 // TODO: 0xFF SELFDESTRUCT
 pub fn selfdestruct(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<()> {
-    evm.gas.take(5_000)?;
+    evm.gas_charge(5_000)?;
     // TODO: transfer value, mark deleted
     Ok(())
 }

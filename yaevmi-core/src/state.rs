@@ -28,6 +28,9 @@ pub trait State {
     fn code(&mut self, acc: &Acc) -> Option<(Buf, Int)>;
     fn acc(&mut self, acc: &Acc) -> Option<Account>;
 
+    fn is_cold_acc(&self, acc: &Acc) -> bool;
+    fn is_cold_key(&self, acc: &Acc, key: &Int) -> bool;
+
     fn warm_acc(&mut self, acc: &Acc) -> bool;
     fn warm_key(&mut self, acc: &Acc, key: &Int) -> bool;
 

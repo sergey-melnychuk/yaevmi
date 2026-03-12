@@ -1,5 +1,10 @@
 pub mod dto;
 
+use std::sync::{
+    Arc,
+    atomic::{AtomicUsize, Ordering},
+};
+
 use yaevmi_base::{Acc, Int, dto::Head};
 use yaevmi_core::{
     Call, Tx,
@@ -309,15 +314,21 @@ async fn test_shallow_stack() {
 
 /// Run every test in GeneralStateTests/ for the Cancun fork.
 /// Prints a pass/fail summary per category. Not run by default.
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn test_general_state_cancun() -> eyre::Result<()> {
     const FORK: &str = "Cancun";
     let root = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/GeneralStateTests");
+
+    let counter = Arc::new(AtomicUsize::new(0));
 
     let mut handles = Vec::new();
     for category in std::fs::read_dir(root).expect("GeneralStateTests not found") {
         let category = category.unwrap().path();
         if !category.is_dir() {
+            continue;
+        }
+        let category_name = category.file_name().and_then(|n| n.to_str()).unwrap_or("");
+        if category_name == "stTimeConsuming" && std::env::var("RUN_TIME_CONSUMING").is_err() {
             continue;
         }
         for entry in std::fs::read_dir(&category).unwrap() {
@@ -334,10 +345,12 @@ async fn test_general_state_cancun() -> eyre::Result<()> {
                 }
             };
 
+            let counter = counter.clone();
             let handle = tokio::spawn(async move {
                 let mut total: usize = 0;
                 let mut failed = Vec::new();
 
+                // println!("DEBUG: Run: {file_path:?}: {}", file.len());
                 for (name, tc) in file {
                     for result in run_case(&tc, FORK).await {
                         total += 1;
@@ -346,6 +359,9 @@ async fn test_general_state_cancun() -> eyre::Result<()> {
                         }
                     }
                 }
+                println!("DEBUG: Done {file_path:?}: {total}");
+                let count = counter.fetch_add(1, Ordering::Relaxed);
+                println!("DEBUG: Count: {count}");
                 (total, failed)
             });
             handles.push(handle);

@@ -8,10 +8,10 @@ pub fn push(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResul
     let op = evm.code[evm.pc];
     let len = len(op);
     let int = if len == 0 {
-        evm.gas.take(2)?;
+        evm.gas_charge(2)?;
         Int::ZERO
     } else {
-        evm.gas.take(3)?;
+        evm.gas_charge(3)?;
         let lo = evm.pc + 1;
         let hi = evm.pc + 1 + len;
         if lo >= evm.code.len() {
@@ -29,7 +29,7 @@ pub fn push(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResul
 }
 
 pub fn dup(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<()> {
-    evm.gas.take(3)?;
+    evm.gas_charge(3)?;
     let op = evm.code[evm.pc];
     let n = idx(op) - 1;
     let Some(int) = evm.stack.iter().rev().nth(n).copied() else {
@@ -40,7 +40,7 @@ pub fn dup(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult
 }
 
 pub fn swap(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<()> {
-    evm.gas.take(3)?;
+    evm.gas_charge(3)?;
     let op = evm.code[evm.pc];
     let n = idx(op); // SWAP{k}: swap top with (k+1)th, distance = k = idx(op)
     if evm.stack.len() <= n {
