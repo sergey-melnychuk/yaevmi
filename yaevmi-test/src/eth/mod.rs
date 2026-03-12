@@ -99,7 +99,7 @@ pub async fn run_entry(tc: &TestCase, entry: &PostEntry) -> eyre::Result<()> {
 
     let head = build_head(tc);
     let mut state = build_state(tc);
-    let call = build_call(tc, &entry.indexes);
+    let mut call = build_call(tc, &entry.indexes);
 
     let gas_limit = call.gas;
     let value = call.eth;
@@ -123,6 +123,19 @@ pub async fn run_entry(tc: &TestCase, entry: &PostEntry) -> eyre::Result<()> {
         max_fee
     };
 
+    // Intrinsic gas: base cost + calldata cost
+    let intrinsic: u64 = {
+        let base: u64 = if recipient.is_zero() { 53_000 } else { 21_000 };
+        let cd: u64 = call
+            .data
+            .0
+            .iter()
+            .map(|&b| if b == 0 { 4u64 } else { 16u64 })
+            .sum();
+        base + cd
+    };
+    call.gas = gas_limit.saturating_sub(intrinsic);
+
     // 1. Increment sender nonce
     state.inc_nonce(&sender, Int::ONE);
 
@@ -137,6 +150,12 @@ pub async fn run_entry(tc: &TestCase, entry: &PostEntry) -> eyre::Result<()> {
         state.set_value(&recipient, u2i(bal + i2u(value)));
     }
 
+    // EIP-2929: pre-warm sender and recipient
+    state.warm_acc(&sender);
+    if !recipient.is_zero() {
+        state.warm_acc(&recipient);
+    }
+
     // Execute — reverts/halts return Ok(Done { status: 0 }), only infra errors are Err
     let mut exe = Executor::new(call);
     let gas = match exe.run(head, &mut state, &NoChain).await {
@@ -148,8 +167,10 @@ pub async fn run_entry(tc: &TestCase, entry: &PostEntry) -> eyre::Result<()> {
         },
     };
 
-    // Gas accounting
-    let gas_used = (gas.spent.max(0) as u64).min(gas_limit);
+    // Gas accounting (intrinsic + EVM execution)
+    let evm_gas = gas_limit.saturating_sub(intrinsic);
+    let evm_used = (gas.spent.max(0) as u64).min(evm_gas);
+    let gas_used = (intrinsic + evm_used).min(gas_limit);
     let max_refund = gas_used / 5; // EIP-3529
     let gas_refund = (gas.refund.max(0) as u64).min(max_refund);
     let effective_used = gas_used - gas_refund;
@@ -206,7 +227,6 @@ pub async fn run_case(tc: &TestCase, fork: &str) -> Vec<eyre::Result<()>> {
 }
 
 #[tokio::test]
-#[ignore]
 async fn test_shallow_stack() {
     let path = concat!(
         env!("CARGO_MANIFEST_DIR"),
@@ -275,7 +295,7 @@ async fn test_general_state_cancun() -> eyre::Result<()> {
     }
 
     let take = failed.len() / 1;
-    for s in failed.iter().take(10) {
+    for s in failed.iter().take(take) {
         println!("---\n{s}");
     }
     let left = failed.len() - take;
