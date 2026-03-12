@@ -19,6 +19,8 @@ pub fn create(evm: &mut Evm, ctx: &Context, _: &Call, state: &mut dyn State) -> 
     let [value, offset, size] = evm.peek()?;
     let (offset, size) = (offset.as_usize(), size.as_usize());
     evm.mem_expand(offset, size)?;
+    let initcode_cost = 2 * (size as i64 + 31) / 32;
+    evm.gas.take(initcode_cost)?;
 
     let nonce = state.nonce(&ctx.this).unwrap_or(Int::ZERO).as_u64();
     let address = create_address(&ctx.this, nonce);
@@ -216,9 +218,9 @@ pub fn create2(evm: &mut Evm, ctx: &Context, _: &Call, _: &mut dyn State) -> Evm
     let [value, offset, size, salt] = evm.peek()?;
     let (offset, size) = (offset.as_usize(), size.as_usize());
     evm.mem_expand(offset, size)?;
-    // Hash word cost: 6 gas per 32-byte word of init code
-    let hash_cost = 6 * (size as i64 + 31) / 32;
-    evm.gas.take(hash_cost)?;
+    // EIP-3860 initcode word cost (2) + CREATE2 hash word cost (6) = 8 per word
+    let word_cost = 8 * (size as i64 + 31) / 32;
+    evm.gas.take(word_cost)?;
 
     let (data, _pad) = evm.mem_get(offset, size)?;
     let data: Vec<u8> = data.to_vec();

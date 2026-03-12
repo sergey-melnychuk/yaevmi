@@ -147,7 +147,7 @@ pub struct Evm {
     pub code: Vec<u8>,
     pub head: Head,
     pub ret: Vec<u8>,
-    pop: usize,
+    pub(crate) pop: usize,
     mem_cost: i64,
 }
 

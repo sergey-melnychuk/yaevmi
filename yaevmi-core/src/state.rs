@@ -2,6 +2,7 @@ use yaevmi_misc::buf::Buf;
 
 use crate::{Acc, Head, Int, trace::Event};
 
+#[derive(Default)]
 pub struct Account {
     pub value: Int,
     pub nonce: Int,

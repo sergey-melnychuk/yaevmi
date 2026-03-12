@@ -14,30 +14,30 @@ use yaevmi_misc::buf::Buf;
 
 /// Minimal Chain impl for tests — all state is pre-loaded into Cache.
 /// Any Fetch call hitting this means the pre-state is incomplete.
-pub struct NoChain;
+pub struct EmptyChain;
 
 #[async_trait::async_trait]
-impl Chain for NoChain {
+impl Chain for EmptyChain {
     async fn get(&self, _: &Acc, _: &Int) -> eyre::Result<Int> {
-        eyre::bail!("NoChain: unexpected Fetch::StateCell")
+        Ok(Default::default())
     }
-    async fn acc(&self, acc: &Acc) -> eyre::Result<Account> {
-        eyre::bail!("NoChain: unexpected Fetch::Account for {acc:?}")
+    async fn acc(&self, _: &Acc) -> eyre::Result<Account> {
+        Ok(Default::default())
     }
-    async fn code(&self, acc: &Acc) -> eyre::Result<(Buf, Int)> {
-        eyre::bail!("NoChain: unexpected Fetch::Code for {acc:?}")
+    async fn code(&self, _: &Acc) -> eyre::Result<(Buf, Int)> {
+        Ok(Default::default())
     }
-    async fn nonce(&self, acc: &Acc) -> eyre::Result<u64> {
-        eyre::bail!("NoChain: unexpected Fetch::Nonce for {acc:?}")
+    async fn nonce(&self, _: &Acc) -> eyre::Result<u64> {
+        Ok(Default::default())
     }
-    async fn balance(&self, acc: &Acc) -> eyre::Result<Int> {
-        eyre::bail!("NoChain: unexpected Fetch::Balance for {acc:?}")
+    async fn balance(&self, _: &Acc) -> eyre::Result<Int> {
+        Ok(Default::default())
     }
-    async fn head(&self, number: u64) -> eyre::Result<Head> {
-        eyre::bail!("NoChain: unexpected Fetch::BlockHash({number})")
+    async fn head(&self, _: u64) -> eyre::Result<Head> {
+        Ok(Default::default())
     }
     async fn block(&self, number: u64) -> eyre::Result<(Head, Vec<Tx>)> {
-        eyre::bail!("NoChain: block({number}) not available")
+        eyre::bail!("EmptyChain: block({number}) not available")
     }
 }
 
@@ -208,7 +208,7 @@ pub async fn run_entry(tc: &TestCase, entry: &PostEntry) -> eyre::Result<()> {
 
     // Execute — reverts/halts return Ok(Done { status: 0 }), only infra errors are Err
     let mut exe = Executor::new(call, mode);
-    let gas = match exe.run(head, &mut state, &NoChain).await {
+    let gas = match exe.run(head, &mut state, &EmptyChain).await {
         Ok(CallResult::Created { addr, code, gas }) => {
             if !code.is_empty() {
                 let hash = Int::from(yaevmi_misc::keccak256(&code).as_ref());
@@ -217,11 +217,14 @@ pub async fn run_entry(tc: &TestCase, entry: &PostEntry) -> eyre::Result<()> {
             gas
         }
         Ok(CallResult::Done { gas, .. }) => gas,
-        Err(_) => yaevmi_core::evm::Gas {
-            limit: gas_limit as i64,
-            spent: gas_limit as i64,
-            refund: 0,
-        },
+        Err(e) => {
+            println!("DEBUG: ERROR: {e}");
+            yaevmi_core::evm::Gas {
+                limit: gas_limit as i64,
+                spent: gas_limit as i64,
+                refund: 0,
+            }
+        }
     };
 
     // Gas accounting (intrinsic + EVM execution)

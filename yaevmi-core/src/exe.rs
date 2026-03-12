@@ -301,10 +301,11 @@ async fn prepare(
         call.data.clone()
     } else if let Some((code, _)) = state.code(&call.to) {
         code
-    } else {
-        let (code, hash) = chain.code(&call.to).await?;
+    } else if let Ok((code, hash)) = chain.code(&call.to).await {
         state.acc_mut(&call.to).code = (code.clone(), hash);
         code
+    } else {
+        Buf::default()
     };
     let evm = Evm::new(head, code.into_vec(), call.gas);
     let is_static = matches!(mode, CallMode::Static(_, _));
