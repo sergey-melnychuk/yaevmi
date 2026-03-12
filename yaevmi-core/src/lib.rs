@@ -9,6 +9,7 @@ pub use yaevmi_base::{
 };
 use yaevmi_misc::buf::Buf;
 
+pub mod aux;
 pub mod cache;
 pub mod chain;
 pub mod evm;
