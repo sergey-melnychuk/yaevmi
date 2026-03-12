@@ -132,6 +132,11 @@ pub fn sstore(evm: &mut Evm, ctx: &Context, _: &Call, state: &mut dyn State) -> 
 
 const JUMPDEST: u8 = 0x5B;
 
+pub fn jumpdest(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<()> {
+    evm.gas.take(1)?;
+    Ok(())
+}
+
 pub fn jump(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<()> {
     evm.gas.take(8)?;
     let [dst] = evm.peek()?;

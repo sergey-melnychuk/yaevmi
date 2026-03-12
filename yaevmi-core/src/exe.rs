@@ -1,22 +1,29 @@
 use yaevmi_base::math::lift;
 use yaevmi_base::{dto::Head, math::U256};
+use yaevmi_misc::keccak256;
+
+use yaevmi_misc::buf::Buf;
 
 use crate::evm::{CallMode, Context, Evm, Gas, StepResult};
 use crate::{Acc, Call, Error, Int, Result};
 use crate::{
     chain::{Chain, fetch},
-    state::State,
+    state::{Account, State},
 };
 
 const MAX_CALL_DEPTH: usize = 1024;
+const MAX_STEPS: u64 = 1_000_000;
+const MAX_CODE_SIZE: usize = 24_576;
+const CODE_DEPOSIT_GAS: i64 = 200;
 
 pub enum CallResult {
     Done { status: Int, ret: Vec<u8>, gas: Gas },
-    Created(Acc, Gas),
+    Created { addr: Acc, code: Vec<u8>, gas: Gas },
 }
 
 pub struct Executor {
     pub call: Call,
+    pub mode: CallMode,
     pub callstack: Vec<CallFrame>,
 }
 
@@ -28,9 +35,10 @@ pub struct CallFrame {
 }
 
 impl Executor {
-    pub fn new(call: Call) -> Self {
+    pub fn new(call: Call, mode: CallMode) -> Self {
         Self {
             call,
+            mode,
             callstack: vec![],
         }
     }
@@ -42,22 +50,28 @@ impl Executor {
         chain: &impl Chain,
     ) -> Result<CallResult> {
         if self.callstack.is_empty() {
-            let frame = prepare(
-                head,
-                self.call.clone(),
-                CallMode::Call(0, 0),
-                None,
-                state,
-                chain,
-            )
-            .await?;
+            let frame = prepare(head, self.call.clone(), self.mode, None, state, chain).await?;
             self.callstack.push(frame);
         }
 
         let mut target: (usize, usize) = (0, 0);
         let mut result: Option<CallResult> = None;
+        let mut steps: u64 = 0;
 
         while let Some(this) = self.callstack.last_mut() {
+            steps += 1;
+            if steps > MAX_STEPS {
+                this.evm.gas.drain();
+                let gas = this.evm.gas;
+                let checkpoint = this.checkpoint;
+                state.revert_to(checkpoint);
+                self.callstack.clear();
+                return Ok(CallResult::Done {
+                    status: Int::ZERO,
+                    ret: vec![],
+                    gas,
+                });
+            }
             // Process a result returned from a completed subcall
             if let Some(call_result) = result.take() {
                 match call_result {
@@ -76,8 +90,12 @@ impl Executor {
                         target = (0, 0);
                         result = None;
                     }
-                    CallResult::Created(acc, gas) => {
-                        let _ = this.evm.push(acc.to());
+                    CallResult::Created { addr, code, gas } => {
+                        if !code.is_empty() {
+                            let hash = Int::from(keccak256(&code).as_ref());
+                            state.acc_mut(&addr).code = (code.into(), hash);
+                        }
+                        let _ = this.evm.push(addr.to());
                         this.evm.gas.spent += gas.spent;
                         this.evm.gas.refund += gas.refund;
                         this.evm.ret.clear();
@@ -88,10 +106,13 @@ impl Executor {
             match this.evm.step(&this.ctx, &this.call, state)? {
                 StepResult::Ok => continue,
                 StepResult::End => {
-                    // == STOP == RETURN []
                     let (is_create, gas) = (this.call.to.is_zero(), this.evm.gas);
                     result = Some(if is_create {
-                        CallResult::Created(this.ctx.this, gas)
+                        CallResult::Created {
+                            addr: this.ctx.this,
+                            code: vec![],
+                            gas,
+                        }
                     } else {
                         CallResult::Done {
                             status: Int::ONE,
@@ -104,6 +125,56 @@ impl Executor {
                 StepResult::Call(call, mode) => {
                     let checkpoint = state.checkpoint();
                     target = mode.range();
+
+                    let is_create = matches!(mode, CallMode::Create(_) | CallMode::Create2(_));
+
+                    if is_create {
+                        let creator = call.by;
+                        let addr = mode.acc();
+
+                        // Increment creator's nonce
+                        state.inc_nonce(&creator, Int::ONE);
+
+                        // Collision check: existing nonce or code at derived address
+                        let existing_nonce = state.nonce(&addr).unwrap_or(Int::ZERO);
+                        let has_code = state.code(&addr).map_or(false, |(c, _)| !c.0.is_empty());
+                        if !existing_nonce.is_zero() || has_code {
+                            state.revert_to(checkpoint);
+                            let _ = this.evm.push(Int::ZERO);
+                            this.evm.ret = vec![];
+                            target = (0, 0);
+                            continue;
+                        }
+
+                        // Create account with nonce=1 (EIP-161)
+                        state.create(
+                            addr,
+                            Account {
+                                value: Int::ZERO,
+                                nonce: Int::ONE,
+                                code: (Buf::default(), Int::ZERO),
+                            },
+                        );
+
+                        // Value transfer from creator to new account
+                        if !call.eth.is_zero() {
+                            let gte = lift(|[a, b]| if a >= b { U256::ONE } else { U256::ZERO });
+                            let by0 = state.balance(&creator).unwrap_or_default();
+                            if gte([by0, call.eth]).is_zero() {
+                                state.revert_to(checkpoint);
+                                let _ = this.evm.push(Int::ZERO);
+                                this.evm.ret = vec![];
+                                target = (0, 0);
+                                continue;
+                            }
+                            let sub = lift(|[a, b]| a - b);
+                            let add = lift(|[a, b]| a + b);
+                            state.set_value(&creator, sub([by0, call.eth]));
+                            let to0 = state.balance(&addr).unwrap_or_default();
+                            state.set_value(&addr, add([to0, call.eth]));
+                        }
+                    }
+
                     let frame =
                         prepare(head, call.clone(), mode, Some(&this.ctx), state, chain).await?;
                     if frame.ctx.depth > MAX_CALL_DEPTH {
@@ -115,18 +186,17 @@ impl Executor {
                     }
 
                     // ETH value transfer for CALL and CALLCODE
-                    if !call.eth.is_zero()
+                    if !is_create
+                        && !call.eth.is_zero()
                         && matches!(mode, CallMode::Call(..) | CallMode::CallCode(..))
                     {
                         let by = call.by;
                         let to = state.auth(&call.to).unwrap_or(call.to);
-                        let to0 = state.balance(&to).unwrap_or_default();
                         let by0 = state.balance(&by).unwrap_or_default();
 
                         let gte = lift(|[a, b]| if a >= b { U256::ONE } else { U256::ZERO });
-                        let sufficient = !gte([by0, to0]).is_zero();
-                        if !sufficient {
-                            // Insufficient balance — fail without executing subcall
+                        if gte([by0, call.eth]).is_zero() {
+                            state.revert_to(checkpoint);
                             let _ = this.evm.push(Int::ZERO);
                             this.evm.ret = vec![];
                             target = (0, 0);
@@ -135,20 +205,36 @@ impl Executor {
 
                         let add = lift(|[a, b]| a + b);
                         let sub = lift(|[a, b]| a - b);
-
-                        let by1 = sub([by0, call.eth]);
-                        let to1 = add([to0, call.eth]);
-
-                        state.set_value(&by, by1);
-                        state.set_value(&to, to1);
+                        let to0 = state.balance(&to).unwrap_or_default();
+                        state.set_value(&by, sub([by0, call.eth]));
+                        state.set_value(&to, add([to0, call.eth]));
                     }
                     self.callstack.push(frame);
                 }
                 StepResult::Return(ret) => {
-                    let (is_create, gas) = (this.call.to.is_zero(), this.evm.gas);
+                    let is_create = this.call.to.is_zero();
                     result = Some(if is_create {
-                        CallResult::Created(this.ctx.this, gas)
+                        let deploy_cost = CODE_DEPOSIT_GAS * ret.len() as i64;
+                        if ret.len() > MAX_CODE_SIZE || this.evm.gas.remaining() < deploy_cost {
+                            this.evm.gas.drain();
+                            let gas = this.evm.gas;
+                            state.revert_to(this.checkpoint);
+                            CallResult::Done {
+                                status: Int::ZERO,
+                                ret: vec![],
+                                gas,
+                            }
+                        } else {
+                            this.evm.gas.spent += deploy_cost;
+                            let gas = this.evm.gas;
+                            CallResult::Created {
+                                addr: this.ctx.this,
+                                code: ret,
+                                gas,
+                            }
+                        }
                     } else {
+                        let gas = this.evm.gas;
                         CallResult::Done {
                             status: Int::ONE,
                             ret,

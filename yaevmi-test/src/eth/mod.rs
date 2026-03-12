@@ -76,6 +76,7 @@ pub fn build_head(tc: &TestCase) -> Head {
         timestamp: tc.env.current_timestamp,
         base_fee: tc.env.current_base_fee.unwrap_or(Int::ZERO),
         prevrandao: hash,
+        chain_id: Int::from(1u32),
         ..Head::default()
     }
 }
@@ -123,7 +124,18 @@ pub async fn run_entry(tc: &TestCase, entry: &PostEntry) -> eyre::Result<()> {
         max_fee
     };
 
-    // Intrinsic gas: base cost + calldata cost
+    // Access list for this data index (EIP-2930)
+    let access_list: Vec<dto::AccessListEntry> = tc
+        .transaction
+        .access_lists
+        .as_deref()
+        .unwrap_or_default()
+        .get(entry.indexes.data)
+        .and_then(|o| o.as_ref())
+        .cloned()
+        .unwrap_or_default();
+
+    // Intrinsic gas: base + calldata + EIP-3860 initcode + EIP-2930 access list
     let intrinsic: u64 = {
         let base: u64 = if recipient.is_zero() { 53_000 } else { 21_000 };
         let cd: u64 = call
@@ -132,11 +144,25 @@ pub async fn run_entry(tc: &TestCase, entry: &PostEntry) -> eyre::Result<()> {
             .iter()
             .map(|&b| if b == 0 { 4u64 } else { 16u64 })
             .sum();
-        base + cd
+        let initcode_cost: u64 = if recipient.is_zero() {
+            2 * ((call.data.0.len() as u64 + 31) / 32)
+        } else {
+            0
+        };
+        let al_cost: u64 = access_list
+            .iter()
+            .map(|e| 2400 + e.storage_keys.len() as u64 * 1900)
+            .sum();
+        base + cd + initcode_cost + al_cost
     };
-    call.gas = gas_limit.saturating_sub(intrinsic);
+    // Reject invalid transactions (gasLimit < intrinsic)
+    if gas_limit < intrinsic {
+        return Ok(());
+    }
+    call.gas = gas_limit - intrinsic;
 
     // 1. Increment sender nonce
+    let sender_nonce = state.nonce(&sender).unwrap_or(Int::ZERO).as_u64();
     state.inc_nonce(&sender, Int::ONE);
 
     // 2. Upfront deduction: gas_limit * max_fee + value
@@ -144,22 +170,53 @@ pub async fn run_entry(tc: &TestCase, entry: &PostEntry) -> eyre::Result<()> {
     let bal = i2u(state.balance(&sender).unwrap_or(Int::ZERO));
     state.set_value(&sender, u2i(bal - upfront));
 
-    // 3. Value transfer to recipient (regular calls only)
-    if !value.is_zero() && !recipient.is_zero() {
-        let bal = i2u(state.balance(&recipient).unwrap_or(Int::ZERO));
-        state.set_value(&recipient, u2i(bal + i2u(value)));
-    }
+    // 3. Determine call mode and handle value transfer / account creation
+    let mode = if recipient.is_zero() {
+        let addr = yaevmi_core::aux::create_address(&sender, sender_nonce);
+        state.create(
+            addr,
+            yaevmi_core::state::Account {
+                value: Int::ZERO,
+                nonce: Int::ONE,
+                code: (yaevmi_misc::buf::Buf::default(), Int::ZERO),
+            },
+        );
+        if !value.is_zero() {
+            let bal = i2u(state.balance(&addr).unwrap_or(Int::ZERO));
+            state.set_value(&addr, u2i(bal + i2u(value)));
+        }
+        yaevmi_core::evm::CallMode::Create(addr)
+    } else {
+        if !value.is_zero() {
+            let bal = i2u(state.balance(&recipient).unwrap_or(Int::ZERO));
+            state.set_value(&recipient, u2i(bal + i2u(value)));
+        }
+        yaevmi_core::evm::CallMode::Call(0, 0)
+    };
 
-    // EIP-2929: pre-warm sender and recipient
+    // EIP-2929: pre-warm sender, recipient, and access list
     state.warm_acc(&sender);
     if !recipient.is_zero() {
         state.warm_acc(&recipient);
     }
+    for al_entry in &access_list {
+        state.warm_acc(&al_entry.address);
+        for key in &al_entry.storage_keys {
+            state.warm_key(&al_entry.address, key);
+        }
+    }
 
     // Execute — reverts/halts return Ok(Done { status: 0 }), only infra errors are Err
-    let mut exe = Executor::new(call);
+    let mut exe = Executor::new(call, mode);
     let gas = match exe.run(head, &mut state, &NoChain).await {
-        Ok(CallResult::Done { gas, .. }) | Ok(CallResult::Created(_, gas)) => gas,
+        Ok(CallResult::Created { addr, code, gas }) => {
+            if !code.is_empty() {
+                let hash = Int::from(yaevmi_misc::keccak256(&code).as_ref());
+                state.acc_mut(&addr).code = (code.into(), hash);
+            }
+            gas
+        }
+        Ok(CallResult::Done { gas, .. }) => gas,
         Err(_) => yaevmi_core::evm::Gas {
             limit: gas_limit as i64,
             spent: gas_limit as i64,
@@ -175,12 +232,12 @@ pub async fn run_entry(tc: &TestCase, entry: &PostEntry) -> eyre::Result<()> {
     let gas_refund = (gas.refund.max(0) as u64).min(max_refund);
     let effective_used = gas_used - gas_refund;
 
-    // 4. Refund unused gas to sender (at max_fee rate per EIP-1559)
-    let refund_wei = U256::from(gas_limit - effective_used) * max_fee;
+    // 4. Refund sender: upfront was gas_limit*max_fee, actual cost is effective_used*gas_price
+    let refund_wei = U256::from(gas_limit) * max_fee - U256::from(effective_used) * gas_price;
     let bal = i2u(state.balance(&sender).unwrap_or(Int::ZERO));
     state.set_value(&sender, u2i(bal + refund_wei));
 
-    // 5. Pay coinbase priority fee
+    // 5. Pay coinbase the priority fee (effective_gas_price - base_fee) * gas_used
     let priority = gas_price.saturating_sub(base_fee);
     let miner_reward = U256::from(effective_used) * priority;
     if !miner_reward.is_zero() {

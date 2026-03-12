@@ -116,7 +116,7 @@ pub const OPS: [(&str, Handler); 256] = [
     ("PC", store::pc),
     ("MSIZE", store::msize),
     ("GAS", store::gas),
-    ("JUMPDEST", invalid),
+    ("JUMPDEST", store::jumpdest),
     ("TLOAD", store::tload),
     ("TSTORE", store::tstore),
     ("MCOPY", store::mcopy),

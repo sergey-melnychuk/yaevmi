@@ -278,18 +278,18 @@ pub fn byte(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResul
 
 pub fn shl(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<()> {
     evm.gas.take(3)?;
-    let [a, b] = evm.peek()?;
-    let f = lift(|[a, b]| a << b);
-    let r = f([a, b]);
+    let [shift, val] = evm.peek()?;
+    let f = lift(|[shift, val]| val << shift);
+    let r = f([shift, val]);
     evm.push(r)?;
     Ok(())
 }
 
 pub fn shr(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<()> {
     evm.gas.take(3)?;
-    let [a, b] = evm.peek()?;
-    let f = lift(|[a, b]| a >> b);
-    let r = f([a, b]);
+    let [shift, val] = evm.peek()?;
+    let f = lift(|[shift, val]| val >> shift);
+    let r = f([shift, val]);
     evm.push(r)?;
     Ok(())
 }

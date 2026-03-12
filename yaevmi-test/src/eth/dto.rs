@@ -46,6 +46,16 @@ pub struct Transaction {
     pub sender: Acc,
     pub to: Option<Acc>,
     pub value: Vec<Int>,
+    #[serde(default)]
+    pub access_lists: Option<Vec<Option<Vec<AccessListEntry>>>>,
+}
+
+#[derive(Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AccessListEntry {
+    pub address: Acc,
+    #[serde(default)]
+    pub storage_keys: Vec<Int>,
 }
 
 #[derive(Deserialize)]
