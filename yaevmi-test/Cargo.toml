@@ -14,4 +14,5 @@ yaevmi-core.workspace = true
 yaevmi-misc.workspace = true
 
 [dev-dependencies]
+futures = "0.3"
 tokio = { version = "1.50.0", features = ["full"] }

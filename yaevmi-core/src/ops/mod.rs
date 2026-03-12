@@ -319,7 +319,7 @@ pub mod tests {
             to: Acc::ZERO,
             gas: 0,
             eth: Int::ZERO,
-            data: vec![],
+            data: vec![].into(),
             auth: vec![],
             nonce: None,
         }
@@ -336,7 +336,7 @@ pub mod tests {
             Self(Account {
                 value: Int::ZERO,
                 nonce: Int::ZERO,
-                code: (vec![], Int::ZERO),
+                code: (vec![].into(), Int::ZERO),
             })
         }
     }
@@ -372,7 +372,7 @@ pub mod tests {
         fn nonce(&mut self, _: &Acc) -> Option<Int> {
             None
         }
-        fn code(&mut self, _: &Acc) -> Option<(Vec<u8>, Int)> {
+        fn code(&mut self, _: &Acc) -> Option<(Buf, Int)> {
             None
         }
         fn acc(&mut self, _: &Acc) -> Option<Account> {

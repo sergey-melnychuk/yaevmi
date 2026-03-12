@@ -1,11 +1,11 @@
 use yaevmi_misc::buf::Buf;
 
-use crate::{Acc, Head, Int, Result, Tx, evm::Fetch, trace::Event};
+use crate::{Acc, Head, Int, trace::Event};
 
 pub struct Account {
     pub value: Int,
     pub nonce: Int,
-    pub code: (Vec<u8>, Int),
+    pub code: (Buf, Int),
 }
 
 pub trait State {
@@ -24,7 +24,7 @@ pub trait State {
 
     fn balance(&mut self, acc: &Acc) -> Option<Int>;
     fn nonce(&mut self, acc: &Acc) -> Option<Int>;
-    fn code(&mut self, acc: &Acc) -> Option<(Vec<u8>, Int)>;
+    fn code(&mut self, acc: &Acc) -> Option<(Buf, Int)>;
     fn acc(&mut self, acc: &Acc) -> Option<Account>;
 
     fn warm_acc(&mut self, acc: &Acc) -> bool;
@@ -42,46 +42,11 @@ pub trait State {
     fn destroyed(&self) -> &[Acc];
 
     fn emit(&mut self, event: Event) -> usize;
-}
 
-#[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
-#[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
-pub trait Chain {
-    async fn get(&self, acc: &Acc, key: &Int) -> eyre::Result<Int>;
-    async fn acc(&self, acc: &Acc) -> eyre::Result<Account>;
-    async fn code(&self, acc: &Acc) -> eyre::Result<(Vec<u8>, Int)>;
-    async fn nonce(&self, acc: &Acc) -> eyre::Result<u64>;
-    async fn balance(&self, acc: &Acc) -> eyre::Result<Int>;
-    async fn head(&self, number: u64) -> eyre::Result<Head>;
-    async fn block(&self, number: u64) -> eyre::Result<(Head, Vec<Tx>)>;
-}
-
-pub async fn fetch(f: Fetch, state: &mut impl State, chain: &impl Chain) -> Result<()> {
-    match f {
-        Fetch::Account(acc) => {
-            let account = chain.acc(&acc).await?;
-            *state.acc_mut(&acc) = account;
-        }
-        Fetch::Balance(acc) => {
-            let account = chain.acc(&acc).await?;
-            *state.acc_mut(&acc) = account;
-        }
-        Fetch::Nonce(acc) => {
-            let account = chain.acc(&acc).await?;
-            *state.acc_mut(&acc) = account;
-        }
-        Fetch::Code(acc) => {
-            let account = chain.acc(&acc).await?;
-            *state.acc_mut(&acc) = account;
-        }
-        Fetch::BlockHash(number) => {
-            let head = chain.head(number).await?;
-            state.hash(number, head.hash);
-        }
-        Fetch::StateCell(acc, key) => {
-            let val = chain.get(&acc, &key).await?;
-            state.init(&acc, &key, val);
-        }
+    /// Take a state checkpoint; returns an opaque ID that can be passed to `revert_to`.
+    fn checkpoint(&mut self) -> usize {
+        0
     }
-    Ok(())
+    /// Revert all state mutations since the given checkpoint.
+    fn revert_to(&mut self, _checkpoint: usize) {}
 }

@@ -5,9 +5,9 @@ use yaevmi_base::{
     Acc, Int,
     dto::{Head, Tx},
 };
-use yaevmi_misc::http::Http;
+use yaevmi_misc::{buf::Buf, http::Http};
 
-use crate::state::{Account, Chain};
+use crate::{chain::Chain, state::Account};
 
 pub struct Rpc {
     url: String,
@@ -35,7 +35,7 @@ impl Chain for Rpc {
         eyre::bail!("WIP")
     }
 
-    async fn code(&self, _acc: &Acc) -> eyre::Result<(Vec<u8>, Int)> {
+    async fn code(&self, _acc: &Acc) -> eyre::Result<(Buf, Int)> {
         eyre::bail!("WIP")
     }
 

@@ -6,12 +6,13 @@ use yaevmi_misc::keccak256;
 
 use crate::{
     Call,
-    evm::{Context, Evm, EvmResult},
+    evm::mem_check,
+    evm::{Context, Evm, EvmResult, EvmYield},
     state::State,
 };
 
 pub fn stop(_: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<()> {
-    Ok(())
+    Err(EvmYield::Return(vec![]))
 }
 
 pub fn add(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<()> {
@@ -44,6 +45,10 @@ pub fn sub(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult
 pub fn div(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<()> {
     evm.gas.take(5)?;
     let [a, b] = evm.peek()?;
+    if b.is_zero() {
+        evm.push(Int::ZERO)?;
+        return Ok(());
+    }
     let f = lift(|[a, b]| a / b);
     let r = f([a, b]);
     evm.push(r)?;
@@ -78,6 +83,10 @@ pub fn sdiv(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResul
 pub fn r#mod(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<()> {
     evm.gas.take(5)?;
     let [a, b] = evm.peek()?;
+    if b.is_zero() {
+        evm.push(Int::ZERO)?;
+        return Ok(());
+    }
     let f = lift(|[a, b]| a % b);
     let r = f([a, b]);
     evm.push(r)?;
@@ -308,7 +317,8 @@ pub fn hash(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResul
     evm.gas.take(30)?;
     let [offset, size] = evm.peek()?;
     let (offset, size) = (offset.as_usize(), size.as_usize());
-    let (data, _) = evm.mem_get(offset..offset + size)?;
+    mem_check(offset, size)?;
+    let (data, _) = evm.mem_get(offset, size)?;
     let hash = keccak256(data);
     evm.push(hash)?;
     Ok(())

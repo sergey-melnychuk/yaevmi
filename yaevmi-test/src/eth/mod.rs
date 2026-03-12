@@ -1,16 +1,18 @@
-pub mod setup;
-pub mod state;
+pub mod dto;
 
-use setup::{PostEntry, TestCase};
-use state::InMemoryState;
 use yaevmi_base::{Acc, Int, dto::Head};
 use yaevmi_core::{
     Call, Tx,
+    cache::Cache,
+    chain::Chain,
     exe::{CallResult, Executor},
-    state::{Account, Chain, State},
+    state::{Account, State},
 };
 
-/// Minimal Chain impl for tests — all state is pre-loaded into InMemoryState.
+use dto::{PostEntry, TestCase};
+use yaevmi_misc::buf::Buf;
+
+/// Minimal Chain impl for tests — all state is pre-loaded into Cache.
 /// Any Fetch call hitting this means the pre-state is incomplete.
 pub struct NoChain;
 
@@ -22,7 +24,7 @@ impl Chain for NoChain {
     async fn acc(&self, acc: &Acc) -> eyre::Result<Account> {
         eyre::bail!("NoChain: unexpected Fetch::Account for {acc:?}")
     }
-    async fn code(&self, acc: &Acc) -> eyre::Result<(Vec<u8>, Int)> {
+    async fn code(&self, acc: &Acc) -> eyre::Result<(Buf, Int)> {
         eyre::bail!("NoChain: unexpected Fetch::Code for {acc:?}")
     }
     async fn nonce(&self, acc: &Acc) -> eyre::Result<u64> {
@@ -39,17 +41,17 @@ impl Chain for NoChain {
     }
 }
 
-/// Build an InMemoryState from a test case's `pre` section.
-pub fn build_state(tc: &TestCase) -> InMemoryState {
+/// Build an Cache from a test case's `pre` section.
+pub fn build_state(tc: &TestCase) -> Cache {
     use yaevmi_misc::keccak256;
-    let mut state = InMemoryState::new();
+    let mut state = Cache::new();
     for (addr, pre) in &tc.pre {
         let code = pre.code.as_slice().to_vec();
         let code_hash = keccak256(&code);
         let account = Account {
             value: pre.balance,
             nonce: pre.nonce,
-            code: (code, code_hash),
+            code: (code.into(), code_hash),
         };
         state.insert_account(*addr, account);
         for (key, val) in &pre.storage {
@@ -79,13 +81,13 @@ pub fn build_head(tc: &TestCase) -> Head {
 }
 
 /// Build a Call for one (data_idx, gas_idx, value_idx) combination.
-pub fn build_call(tc: &TestCase, idx: &setup::Indexes) -> Call {
+pub fn build_call(tc: &TestCase, idx: &dto::Indexes) -> Call {
     Call {
         by: tc.transaction.sender,
         to: tc.transaction.to.unwrap_or(Acc::ZERO),
         gas: tc.transaction.gas_limit[idx.gas].as_u64(),
         eth: tc.transaction.value[idx.value],
-        data: tc.transaction.data[idx.data].as_slice().to_vec(),
+        data: tc.transaction.data[idx.data].as_slice().to_vec().into(),
         auth: vec![],
         nonce: Some(tc.transaction.nonce.as_u64()),
     }
@@ -203,73 +205,87 @@ pub async fn run_case(tc: &TestCase, fork: &str) -> Vec<eyre::Result<()>> {
     results
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[tokio::test]
-    async fn test_shallow_stack() {
-        let path = concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/tests/GeneralStateTests/stStackTests/shallowStack.json"
-        );
-        let file: setup::TestFile =
-            serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
-        for (name, tc) in &file {
-            for result in run_case(tc, "Cancun").await {
-                assert!(result.is_ok(), "{name}: {}", result.unwrap_err());
-            }
+#[tokio::test]
+#[ignore]
+async fn test_shallow_stack() {
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/GeneralStateTests/stStackTests/shallowStack.json"
+    );
+    let file: dto::TestFile =
+        serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+    for (name, tc) in &file {
+        for result in run_case(tc, "Cancun").await {
+            assert!(result.is_ok(), "{name}: {}", result.unwrap_err());
         }
     }
+}
 
-    /// Run every test in GeneralStateTests/ for the Cancun fork.
-    /// Prints a pass/fail summary per category. Not run by default.
-    // #[ignore]
-    #[tokio::test]
-    async fn test_general_state_cancun() {
-        const FORK: &str = "Cancun";
-        let root = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/GeneralStateTests");
-        let mut total = 0usize;
-        let mut passed = 0usize;
+/// Run every test in GeneralStateTests/ for the Cancun fork.
+/// Prints a pass/fail summary per category. Not run by default.
+#[tokio::test(flavor = "multi_thread")]
+async fn test_general_state_cancun() -> eyre::Result<()> {
+    const FORK: &str = "Cancun";
+    let root = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/GeneralStateTests");
 
-        for category in std::fs::read_dir(root).expect("GeneralStateTests not found") {
-            let category = category.unwrap().path();
-            if !category.is_dir() {
+    let mut handles = Vec::new();
+    for category in std::fs::read_dir(root).expect("GeneralStateTests not found") {
+        let category = category.unwrap().path();
+        if !category.is_dir() {
+            continue;
+        }
+        for entry in std::fs::read_dir(&category).unwrap() {
+            let file_path = entry.unwrap().path();
+            if file_path.extension().and_then(|e| e.to_str()) != Some("json") {
                 continue;
             }
-            for entry in std::fs::read_dir(&category).unwrap() {
-                let file_path = entry.unwrap().path();
-                if file_path.extension().and_then(|e| e.to_str()) != Some("json") {
+            let src = std::fs::read_to_string(&file_path).unwrap();
+            let file: dto::TestFile = match serde_json::from_str(&src) {
+                Ok(f) => f,
+                Err(e) => {
+                    println!("ERROR: {}: parse error: {e}", file_path.display());
                     continue;
                 }
-                let src = std::fs::read_to_string(&file_path).unwrap();
-                let file: setup::TestFile = match serde_json::from_str(&src) {
-                    Ok(f) => f,
-                    Err(e) => {
-                        println!("ERROR: {}: parse error: {e}", file_path.display());
-                        continue;
-                    }
-                };
-                for (name, tc) in &file {
-                    println!("---\nTEST: {name}");
-                    for result in run_case(tc, FORK).await {
+            };
+
+            let handle = tokio::spawn(async move {
+                let mut total: usize = 0;
+                let mut failed = Vec::new();
+
+                for (name, tc) in file {
+                    for result in run_case(&tc, FORK).await {
                         total += 1;
-                        match result {
-                            Ok(()) => {
-                                println!("PASS: {name}");
-                                passed += 1;
-                            }
-                            Err(e) => {
-                                println!("FAIL: {name}: {e}");
-                            }
+                        if let Err(e) = result {
+                            failed.push(format!("FAIL: {name}: {e}"));
                         }
                     }
                 }
-            }
+                (total, failed)
+            });
+            handles.push(handle);
         }
-
-        println!("\n=== GeneralStateTests/{FORK} ===");
-        println!("passed: {passed}/{total}");
-        assert!(passed == total, "GeneralStateTests/{FORK} failed");
     }
+
+    let mut total: usize = 0;
+    let mut failed = Vec::new();
+    let results: Result<Vec<_>, _> = futures::future::try_join_all(handles).await;
+    for (n, fs) in results? {
+        total += n;
+        failed.extend_from_slice(&fs);
+    }
+
+    let take = failed.len() / 1;
+    for s in failed.iter().take(10) {
+        println!("---\n{s}");
+    }
+    let left = failed.len() - take;
+    if left > 0 {
+        println!("(skipped {} more failures)", left);
+    }
+
+    let passed = total - failed.len();
+    println!("\n=== GeneralStateTests/{FORK} ===");
+    println!("passed: {passed}/{total}");
+    assert!(passed == total, "GeneralStateTests/{FORK} failed");
+    Ok(())
 }

@@ -1,3 +1,4 @@
+#[cfg(test)]
 pub mod eth;
 
 // git clone --depth 1 https://github.com/ethereum/tests yaevmi-test/tests 2>&1

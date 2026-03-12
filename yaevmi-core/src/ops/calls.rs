@@ -2,6 +2,7 @@ use yaevmi_base::{Acc, Int};
 
 use crate::{
     Call,
+    evm::mem_check,
     evm::{CallMode, Context, Evm, EvmResult, EvmYield},
     state::State,
 };
@@ -10,14 +11,16 @@ use crate::{
 pub fn create(evm: &mut Evm, ctx: &Context, _: &Call, _: &mut dyn State) -> EvmResult<()> {
     let [value, offset, size] = evm.peek()?;
     let (offset, size) = (offset.as_usize(), size.as_usize());
-    let (data, _pad) = evm.mem_get(offset..offset + size)?;
+    mem_check(offset, size)?;
+
+    let (data, _pad) = evm.mem_get(offset, size)?;
 
     let call = Call {
         by: ctx.this,
         to: Acc::ZERO,
         gas: 0, // TODO
         eth: value,
-        data: data.to_vec(),
+        data: data.to_vec().into(),
         auth: vec![],
         nonce: None,
     };
@@ -41,23 +44,22 @@ pub fn call(evm: &mut Evm, ctx: &Context, _: &Call, _: &mut dyn State) -> EvmRes
     let (args_offset, args_size) = (args_offset.as_usize(), args_size.as_usize());
     let (ret_offset, ret_size) = (ret_offset.as_usize(), ret_size.as_usize());
     let address: Acc = address.to();
+    mem_check(args_offset, args_size)?;
+    mem_check(ret_offset, args_size)?;
 
-    let (data, _pad) = evm.mem_get(args_offset..args_offset + args_size)?;
+    let (data, _pad) = evm.mem_get(args_offset, args_size)?;
 
     let call = Call {
         by: ctx.this,
         to: address,
         gas: gas.as_u64(),
         eth: value,
-        data: data.to_vec(),
+        data: data.to_vec().into(),
         auth: vec![],
         nonce: None,
     };
 
-    Err(EvmYield::Call(
-        call,
-        CallMode::Call(ret_offset..ret_offset + ret_size),
-    ))
+    Err(EvmYield::Call(call, CallMode::Call(ret_offset, ret_size)))
 }
 
 // TODO: 0xF2 CALLCODE
@@ -74,28 +76,30 @@ pub fn callcode(evm: &mut Evm, ctx: &Context, _: &Call, _: &mut dyn State) -> Ev
     let (args_offset, args_size) = (args_offset.as_usize(), args_size.as_usize());
     let (ret_offset, ret_size) = (ret_offset.as_usize(), ret_size.as_usize());
     let address: Acc = address.to();
+    mem_check(args_offset, args_size)?;
+    mem_check(ret_offset, args_size)?;
 
-    let (data, _pad) = evm.mem_get(args_offset..args_offset + args_size)?;
+    let (data, _pad) = evm.mem_get(args_offset, args_size)?;
 
     let call = Call {
         by: ctx.this,
         to: address,
         gas: gas.as_u64(),
         eth: value,
-        data: data.to_vec(),
+        data: data.to_vec().into(),
         auth: vec![],
         nonce: None,
     };
 
     Err(EvmYield::Call(
         call,
-        CallMode::CallCode(ret_offset..ret_offset + ret_size),
+        CallMode::CallCode(ret_offset, ret_size),
     ))
 }
 
 pub fn r#return(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<()> {
     let [offset, size] = evm.peek_usize()?;
-    let (mem, pad) = evm.mem_get(offset..offset + size)?;
+    let (mem, pad) = evm.mem_get(offset, size)?;
     let mut ret = vec![0; mem.len() + pad];
     ret[..mem.len()].copy_from_slice(mem);
     Err(EvmYield::Return(ret))
@@ -103,33 +107,27 @@ pub fn r#return(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmR
 
 // TODO: 0xF4 DELEGATECALL
 pub fn delegatecall(evm: &mut Evm, ctx: &Context, _: &Call, _: &mut dyn State) -> EvmResult<()> {
-    let [
-        gas,
-        address,
-        args_offset,
-        args_size,
-        ret_offset,
-        ret_size,
-    ] = evm.peek()?;
+    let [gas, address, args_offset, args_size, ret_offset, ret_size] = evm.peek()?;
     let (args_offset, args_size) = (args_offset.as_usize(), args_size.as_usize());
     let (ret_offset, ret_size) = (ret_offset.as_usize(), ret_size.as_usize());
     let address: Acc = address.to();
 
-    let (data, _pad) = evm.mem_get(args_offset..args_offset + args_size)?;
+    mem_check(ret_offset, args_size)?;
+    let (data, _pad) = evm.mem_get(args_offset, args_size)?;
 
     let call = Call {
         by: ctx.this,
         to: address,
         gas: gas.as_u64(),
         eth: Int::ZERO,
-        data: data.to_vec(),
+        data: data.to_vec().into(),
         auth: vec![],
         nonce: None,
     };
 
     Err(EvmYield::Call(
         call,
-        CallMode::Delegate(ret_offset..ret_offset + ret_size),
+        CallMode::Delegate(ret_offset, ret_size),
     ))
 }
 
@@ -137,14 +135,16 @@ pub fn delegatecall(evm: &mut Evm, ctx: &Context, _: &Call, _: &mut dyn State) -
 pub fn create2(evm: &mut Evm, ctx: &Context, _: &Call, _: &mut dyn State) -> EvmResult<()> {
     let [value, offset, size, _salt] = evm.peek()?;
     let (offset, size) = (offset.as_usize(), size.as_usize());
-    let (data, _pad) = evm.mem_get(offset..offset + size)?;
+    mem_check(offset, size)?;
+
+    let (data, _pad) = evm.mem_get(offset, size)?;
 
     let call = Call {
         by: ctx.this,
         to: Acc::ZERO,
         gas: 0, // TODO
         eth: value,
-        data: data.to_vec(),
+        data: data.to_vec().into(),
         auth: vec![],
         nonce: None,
     };
@@ -162,27 +162,25 @@ pub fn staticcall(evm: &mut Evm, ctx: &Context, _: &Call, _: &mut dyn State) -> 
     let (ret_offset, ret_size) = (ret_offset.as_usize(), ret_size.as_usize());
     let address: Acc = address.to();
 
-    let (data, _pad) = evm.mem_get(args_offset..args_offset + args_size)?;
+    mem_check(ret_offset, args_size)?;
+    let (data, _pad) = evm.mem_get(args_offset, args_size)?;
 
     let call = Call {
         by: ctx.this,
         to: address,
         gas: gas.as_u64(),
         eth: Int::ZERO,
-        data: data.to_vec(),
+        data: data.to_vec().into(),
         auth: vec![],
         nonce: None,
     };
 
-    Err(EvmYield::Call(
-        call,
-        CallMode::Call(ret_offset..ret_offset + ret_size),
-    ))
+    Err(EvmYield::Call(call, CallMode::Static(ret_offset, ret_size)))
 }
 
 pub fn revert(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<()> {
     let [offset, size] = evm.peek_usize()?;
-    let (mem, pad) = evm.mem_get(offset..offset + size)?;
+    let (mem, pad) = evm.mem_get(offset, size)?;
     let mut ret = vec![0; mem.len() + pad];
     ret[..mem.len()].copy_from_slice(mem);
     Err(EvmYield::Revert(ret))

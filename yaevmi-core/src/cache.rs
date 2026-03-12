@@ -1,10 +1,10 @@
 use std::collections::{HashMap, HashSet};
 
-use yaevmi_base::{Acc, Int, dto::Head, math::lift};
-use yaevmi_core::{
+use crate::{
     state::{Account, State},
-    trace::{Event, Target},
+    trace::{Event, Target, Trace},
 };
+use yaevmi_base::{Acc, Int, dto::Head, math::lift};
 use yaevmi_misc::buf::Buf;
 
 #[derive(Default)]
@@ -32,25 +32,35 @@ impl Default for AccountEntry {
         Self::new(Account {
             value: Int::ZERO,
             nonce: Int::ZERO,
-            code: (vec![], Int::ZERO),
+            code: (vec![].into(), Int::ZERO),
         })
     }
 }
 
+enum Revert {
+    WarmAcc(Acc),
+    WarmKey(Acc, Int),
+    Store(Acc, Int, Int),
+    Nonce(Acc, Int),
+    Value(Acc, Int),
+    Temp(Int, Int),
+    Code(Acc, Int),
+}
+
 #[derive(Default)]
-pub struct InMemoryState {
+pub struct Cache {
     accounts: HashMap<Acc, AccountEntry>,
     transient: HashMap<Int, Int>,
     warm_accs: HashSet<Acc>,
     warm_keys: HashSet<(Acc, Int)>,
     created: Vec<Acc>,
     destroyed: Vec<Acc>,
-    heads: HashMap<u64, Int>,
+    hash: HashMap<u64, Int>,
     pub logs: Vec<(Buf, Vec<Int>)>,
-    pub events: Vec<Event>,
+    pub events: Vec<Trace>,
 }
 
-impl InMemoryState {
+impl Cache {
     pub fn new() -> Self {
         Self {
             accounts: HashMap::new(),
@@ -59,7 +69,7 @@ impl InMemoryState {
             warm_keys: HashSet::new(),
             created: vec![],
             destroyed: vec![],
-            heads: HashMap::new(),
+            hash: HashMap::new(),
             logs: vec![],
             events: vec![],
         }
@@ -89,7 +99,7 @@ impl InMemoryState {
     }
 }
 
-impl State for InMemoryState {
+impl State for Cache {
     // Storage: returns (current, original)
     fn get(&mut self, acc: &Acc, key: &Int) -> Option<(Int, Int)> {
         let entry = self.accounts.get(acc)?;
@@ -188,6 +198,23 @@ impl State for InMemoryState {
         prev
     }
 
+    // fn set_code(&mut self, acc: &Acc, code: Buf, hash: Int) -> Int {
+    //     let prev = {
+    //         let entry = self.accounts.entry(*acc).or_default();
+    //         let prev = entry.account.value;
+    //         entry.account.value = value;
+    //         prev
+    //     };
+    //     self.emit(Event::Put(
+    //         Target::Value {
+    //             acc: *acc,
+    //             val: prev,
+    //         },
+    //         value,
+    //     ));
+    //     prev
+    // }
+
     fn set_auth(&mut self, _src: &Acc, _dst: &Acc) {
         // TODO: insert EIP-7702 delegation
     }
@@ -214,12 +241,9 @@ impl State for InMemoryState {
         val
     }
 
-    fn code(&mut self, acc: &Acc) -> Option<(Vec<u8>, Int)> {
+    fn code(&mut self, acc: &Acc) -> Option<(Buf, Int)> {
         let (code, hash) = self.accounts.get(acc).map(|e| e.account.code.clone())?;
-        self.emit(Event::Get(Target::Code {
-            acc: *acc,
-            code: code.clone().into(),
-        }));
+        self.emit(Event::Get(Target::Code { acc: *acc, hash }));
         Some((code, hash))
     }
 
@@ -248,6 +272,21 @@ impl State for InMemoryState {
     }
 
     fn create(&mut self, acc: Acc, info: Account) {
+        self.emit(Event::Put(
+            Target::Nonce {
+                acc,
+                val: Int::ZERO,
+            },
+            info.nonce,
+        ));
+        self.emit(Event::Put(
+            Target::Value {
+                acc,
+                val: Int::ZERO,
+            },
+            info.value,
+        ));
+        self.emit(Event::Create(acc));
         self.accounts.insert(acc, AccountEntry::new(info));
         self.created.push(acc);
     }
@@ -255,6 +294,7 @@ impl State for InMemoryState {
     fn destroy(&mut self, acc: &Acc) {
         self.accounts.remove(acc);
         self.destroyed.push(*acc);
+        self.emit(Event::Delete(*acc));
     }
 
     fn created(&self) -> &[Acc] {
@@ -266,7 +306,7 @@ impl State for InMemoryState {
     }
 
     fn head(&self, number: u64) -> Option<Head> {
-        self.heads.get(&number).map(|&hash| Head {
+        self.hash.get(&number).map(|&hash| Head {
             number,
             hash,
             ..Head::default()
@@ -274,7 +314,7 @@ impl State for InMemoryState {
     }
 
     fn hash(&mut self, number: u64, hash: Int) {
-        self.heads.insert(number, hash);
+        self.hash.insert(number, hash);
     }
 
     fn auth(&self, _acc: &Acc) -> Option<Acc> {
@@ -287,7 +327,94 @@ impl State for InMemoryState {
     }
 
     fn emit(&mut self, event: Event) -> usize {
-        self.events.push(event);
+        let id = self.events.len();
+        self.events.push(Trace {
+            id,
+            event,
+            depth: 0,
+            reverted: false,
+        });
+        id
+    }
+
+    fn checkpoint(&mut self) -> usize {
         self.events.len()
+    }
+
+    fn revert_to(&mut self, cp: usize) {
+        if cp >= self.events.len() {
+            return;
+        }
+
+        // Count logs added since checkpoint (to truncate self.logs)
+        let logs_to_remove = self.events[cp..]
+            .iter()
+            .filter(|t| !t.reverted)
+            .filter(|t| matches!(t.event, Event::Log(..)))
+            .count();
+        self.logs
+            .truncate(self.logs.len().saturating_sub(logs_to_remove));
+
+        // Collect undo operations (immutable borrow of events ends here)
+        let undos: Vec<Revert> = self.events[cp..]
+            .iter()
+            .filter(|t| !t.reverted)
+            .filter_map(|trace| match &trace.event {
+                Event::Put(Target::Store { acc, key, val }, _) => {
+                    Some(Revert::Store(*acc, *key, *val))
+                }
+                Event::Put(Target::Nonce { acc, val }, _) => Some(Revert::Nonce(*acc, *val)),
+                Event::Put(Target::Value { acc, val }, _) => Some(Revert::Value(*acc, *val)),
+                Event::Put(Target::Temp { key, val }, _) => Some(Revert::Temp(*key, *val)),
+                Event::Put(Target::Code { acc, hash }, _) => Some(Revert::Code(*acc, *hash)),
+                Event::WarmAcc(acc) => Some(Revert::WarmAcc(*acc)),
+                Event::WarmKey(acc, key) => Some(Revert::WarmKey(*acc, *key)),
+                _ => None,
+            })
+            .collect();
+
+        // Mark all reverted traces
+        for t in &mut self.events[cp..] {
+            t.reverted = true;
+        }
+
+        // Apply undos in reverse order
+        for undo in undos.into_iter().rev() {
+            match undo {
+                Revert::Store(acc, key, val) => {
+                    if let Some(entry) = self.accounts.get_mut(&acc)
+                        && let Some(slot) = entry.storage.get_mut(&key)
+                    {
+                        slot.current = val;
+                    }
+                }
+                Revert::Nonce(acc, val) => {
+                    if let Some(entry) = self.accounts.get_mut(&acc) {
+                        entry.account.nonce = val;
+                    }
+                }
+                Revert::Value(acc, val) => {
+                    if let Some(entry) = self.accounts.get_mut(&acc) {
+                        entry.account.value = val;
+                    }
+                }
+                Revert::Temp(key, val) => {
+                    if val.is_zero() {
+                        self.transient.remove(&key);
+                    } else {
+                        self.transient.insert(key, val);
+                    }
+                }
+                Revert::Code(_acc, _hash) => {
+                    // TODO: add hash => code cache
+                }
+                Revert::WarmAcc(acc) => {
+                    self.warm_accs.remove(&acc);
+                }
+                Revert::WarmKey(acc, key) => {
+                    self.warm_keys.remove(&(acc, key));
+                }
+            }
+        }
     }
 }

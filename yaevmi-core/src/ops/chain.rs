@@ -2,7 +2,7 @@ use yaevmi_base::Acc;
 
 use crate::{
     Call,
-    evm::{Context, Evm, EvmResult, EvmYield, Fetch},
+    evm::{Context, Evm, EvmResult, EvmYield, Fetch, HaltReason, mem_check},
     state::State,
 };
 
@@ -48,31 +48,37 @@ pub fn callvalue(evm: &mut Evm, _: &Context, call: &Call, _: &mut dyn State) -> 
 pub fn calldataload(evm: &mut Evm, _: &Context, call: &Call, _: &mut dyn State) -> EvmResult<()> {
     evm.gas.take(3)?;
     let [offset] = evm.peek_usize()?;
-    let byte = call.data.get(offset).copied().unwrap_or_default();
-    evm.push(byte.into())?;
+    let mut word = [0u8; 32];
+    if offset < call.data.0.len() {
+        let copy = (call.data.0.len() - offset).min(32);
+        word[..copy].copy_from_slice(&call.data.0[offset..offset + copy]);
+    }
+    evm.push(yaevmi_base::Int::from(&word[..]))?;
     Ok(())
 }
 
 pub fn calldatasize(evm: &mut Evm, _: &Context, call: &Call, _: &mut dyn State) -> EvmResult<()> {
     evm.gas.take(2)?;
-    evm.push(call.data.len().into())?;
+    evm.push(call.data.0.len().into())?;
     Ok(())
 }
 
 pub fn calldatacopy(evm: &mut Evm, _: &Context, call: &Call, _: &mut dyn State) -> EvmResult<()> {
     evm.gas.take(3)?;
     let [dest_offset, offset, size] = evm.peek_usize()?;
-    let lo = offset.min(call.data.len());
-    let hi = (offset + size).min(call.data.len());
+    mem_check(offset, size)?;
+    mem_check(dest_offset, size)?;
+    let lo = offset.min(call.data.0.len());
+    let hi = (offset + size).min(call.data.0.len());
     let len = (lo..hi).len();
     if len > 0 {
-        let data = &call.data[lo..hi];
-        evm.mem_put(dest_offset..dest_offset + len, data)?;
+        let data = &call.data.0[lo..hi];
+        evm.mem_put(dest_offset, len, data)?;
     }
     if len < size {
         let pad = size - (lo..hi).len();
         let data = vec![0; pad];
-        evm.mem_put(dest_offset + len..dest_offset + size, &data)?;
+        evm.mem_put(dest_offset + len, size - len, &data)?;
     }
     Ok(())
 }
@@ -87,17 +93,19 @@ pub fn codesize(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmR
 pub fn codecopy(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<()> {
     evm.gas.take(3)?;
     let [dest_offset, offset, size] = evm.peek_usize()?;
+    mem_check(offset, size)?;
+    mem_check(dest_offset, size)?;
     let lo = offset.min(evm.code.len());
     let hi = (offset + size).min(evm.code.len());
     let len = (lo..hi).len();
     if len > 0 {
         let data = evm.code[lo..hi].to_vec();
-        evm.mem_put(dest_offset..dest_offset + len, &data)?;
+        evm.mem_put(dest_offset, len, &data)?;
     }
     if len < size {
         let pad = size - (lo..hi).len();
         let data = vec![0; pad];
-        evm.mem_put(dest_offset + len..dest_offset + size, &data)?;
+        evm.mem_put(dest_offset + len, size - len, &data)?;
     }
     Ok(())
 }
@@ -118,7 +126,7 @@ pub fn extcodesize(evm: &mut Evm, _: &Context, _: &Call, state: &mut dyn State) 
     if state.warm_acc(&acc) {
         evm.gas.take(2_500)?;
     }
-    evm.push(code.len().into())?;
+    evm.push(code.0.len().into())?;
     Ok(())
 }
 
@@ -135,17 +143,17 @@ pub fn extcodecopy(evm: &mut Evm, _: &Context, _: &Call, state: &mut dyn State) 
         evm.gas.take(2_500)?;
     }
 
-    let lo = offset.min(code.len());
-    let hi = (offset + size).min(code.len());
+    let lo = offset.min(code.0.len());
+    let hi = (offset + size).min(code.0.len());
     let len = (lo..hi).len();
     if len > 0 {
-        let data = &code[lo..hi];
-        evm.mem_put(dest_offset..dest_offset + len, data)?;
+        let data = &code.0[lo..hi];
+        evm.mem_put(dest_offset, len, data)?;
     }
     if len < size {
         let pad = size - (lo..hi).len();
         let data = vec![0; pad];
-        evm.mem_put(dest_offset + len..dest_offset + size, &data)?;
+        evm.mem_put(dest_offset + len, size - len, &data)?;
     }
     Ok(())
 }
@@ -159,18 +167,17 @@ pub fn returndatasize(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -
 pub fn returndatacopy(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<()> {
     evm.gas.take(3)?;
     let [dest_offset, offset, size] = evm.peek_usize()?;
+    mem_check(offset, size)?;
+    mem_check(dest_offset, size)?;
 
-    let lo = offset.min(evm.ret.len());
-    let hi = (offset + size).min(evm.ret.len());
-    let len = (lo..hi).len();
-    if len > 0 {
-        let data = evm.ret[lo..hi].to_vec();
-        evm.mem_put(dest_offset..dest_offset + len, &data)?;
+    // EVM spec: halt if copy range exceeds return data buffer
+    if offset.saturating_add(size) > evm.ret.len() {
+        return Err(EvmYield::Halt(HaltReason::BadCopyRange));
     }
-    if len < size {
-        let pad = size - (lo..hi).len();
-        let data = vec![0; pad];
-        evm.mem_put(dest_offset + len..dest_offset + size, &data)?;
+
+    if size > 0 {
+        let data = evm.ret[offset..offset + size].to_vec();
+        evm.mem_put(dest_offset, size, &data)?;
     }
     Ok(())
 }

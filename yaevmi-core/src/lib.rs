@@ -1,12 +1,16 @@
 use std::borrow::Cow;
 
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 pub use yaevmi_base::{
     Acc, Int,
     dto::{Head, Tx},
 };
+use yaevmi_misc::buf::Buf;
 
+pub mod cache;
+pub mod chain;
 pub mod evm;
 pub mod exe;
 pub mod ops;
@@ -29,13 +33,13 @@ pub enum Error {
 
 pub type Result<T> = std::result::Result<T, Error>;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Call {
     pub by: Acc,
     pub to: Acc,
     pub gas: u64,
     pub eth: Int,
-    pub data: Vec<u8>,
+    pub data: Buf,
     pub auth: Vec<Acc>,
     pub nonce: Option<u64>,
 }

@@ -1,9 +1,9 @@
 [workspace]
 resolver = "3"
 members = [
+    "yaevmi",
     "yaevmi-base",
     "yaevmi-core",
-    "yaevmi-full",
     "yaevmi-misc",
     "yaevmi-test",
     "yaevmi-wasm",

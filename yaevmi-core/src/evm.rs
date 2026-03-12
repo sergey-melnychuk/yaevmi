@@ -1,15 +1,15 @@
-use std::ops::Range;
-
+use serde::{Deserialize, Serialize};
 use yaevmi_base::dto::Head;
 
 use crate::{Acc, Call, Int, Result, ops::OPS, state::State};
 
 const K: usize = 1024;
 
-#[derive(Debug)]
+#[derive(Debug, Deserialize, Serialize)]
 pub enum HaltReason {
     OutOfGas,
     OutOfMemory,
+    BadCopyRange,
     BadJump(usize),
     BadOpcode(u8),
     NonStatic,
@@ -27,24 +27,24 @@ pub enum Fetch {
     StateCell(Acc, Int),
 }
 
-#[derive(Debug)]
+#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
 pub enum CallMode {
-    Call(Range<usize>),
-    Static(Range<usize>),
-    Delegate(Range<usize>),
-    CallCode(Range<usize>),
+    Call(usize, usize),
+    Static(usize, usize),
+    Delegate(usize, usize),
+    CallCode(usize, usize),
     Create(Acc),
     Create2(Acc),
 }
 
 impl CallMode {
-    pub fn range(&self) -> Range<usize> {
+    pub fn range(&self) -> (usize, usize) {
         match self {
-            Self::Call(r) => r.clone(),
-            Self::Static(r) => r.clone(),
-            Self::Delegate(r) => r.clone(),
-            Self::CallCode(r) => r.clone(),
-            _ => 0..0,
+            Self::Call(offset, size) => (*offset, *size),
+            Self::Static(offset, size) => (*offset, *size),
+            Self::Delegate(offset, size) => (*offset, *size),
+            Self::CallCode(offset, size) => (*offset, *size),
+            _ => (0, 0),
         }
     }
 
@@ -106,7 +106,7 @@ impl Gas {
 
     pub fn take(&mut self, gas: i64) -> EvmResult<i64> {
         let rem = self.remaining();
-        if gas <= rem {
+        if rem >= gas {
             self.spent += gas;
             Ok(rem - gas)
         } else {
@@ -210,35 +210,35 @@ impl Evm {
         Ok(())
     }
 
-    pub fn mem_put(&mut self, target: Range<usize>, source: &[u8]) -> EvmResult<()> {
-        let (lo, hi) = (target.start, target.end);
-        let cap = self.memory.capacity();
-        let end = (lo + source.len()).max(hi);
+    pub fn mem_expand(&mut self, offset: usize, size: usize) -> EvmResult<()> {
+        mem_check(offset, size)?;
+        let end = offset + size;
         if end > Evm::MEMORY_SIZE_LIMIT {
             return Err(EvmYield::Halt(HaltReason::OutOfMemory));
         }
-        let cost = if end > self.memory.len() {
-            if end > cap {
-                self.memory.reserve(end - cap);
-            }
+        if end > self.memory.len() {
             self.memory.resize(end, 0);
-            // TODO: calculate memory expansion costs
-            let new_cost = 0;
+            let words = end.div_ceil(32) as i64;
+            let new_cost = words * words / 512 + 3 * words;
             let cost = new_cost - self.mem_cost;
             self.mem_cost = new_cost;
-            cost
-        } else {
-            0
-        };
-        self.gas.take(cost)?;
-        self.memory[lo..hi].copy_from_slice(source);
+            self.gas.take(cost)?;
+        }
         Ok(())
     }
 
-    pub fn mem_get(&self, target: Range<usize>) -> EvmResult<(&[u8], usize)> {
+    pub fn mem_put(&mut self, offset: usize, size: usize, source: &[u8]) -> EvmResult<()> {
+        self.mem_expand(offset, size)?;
+        let copy_len = source.len().min(size);
+        self.memory[offset..offset + copy_len].copy_from_slice(&source[..copy_len]);
+        Ok(())
+    }
+
+    pub fn mem_get(&self, offset: usize, size: usize) -> EvmResult<(&[u8], usize)> {
+        mem_check(offset, size)?;
         let (lo, hi) = (
-            target.start.min(self.memory.len()),
-            target.end.min(self.memory.len()),
+            offset.min(self.memory.len()),
+            (offset + size).min(self.memory.len()),
         );
         let pad = hi.max(self.memory.len()) - self.memory.len();
         Ok((&self.memory[lo..hi], pad))
@@ -253,7 +253,7 @@ impl Evm {
         let Some(op) = self.code.get(self.pc).copied() else {
             return Ok(StepResult::End);
         };
-        let (_, f) = OPS[op as usize];
+        let (_name, f) = OPS[op as usize];
         let result = f(self, ctx, call, state);
         self.pc += 1;
         result.map(|_| StepResult::Ok).or_else(|evm_yield| {
@@ -266,4 +266,11 @@ impl Evm {
             })
         })
     }
+}
+
+pub fn mem_check(offset: usize, size: usize) -> EvmResult<()> {
+    if size < Evm::MEMORY_SIZE_LIMIT && offset <= Evm::MEMORY_SIZE_LIMIT - size {
+        return Ok(());
+    }
+    Err(EvmYield::Halt(HaltReason::OutOfMemory))
 }

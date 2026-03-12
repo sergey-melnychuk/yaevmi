@@ -1,0 +1,53 @@
+use yaevmi_base::{
+    Acc, Int,
+    dto::{Head, Tx},
+};
+use yaevmi_misc::buf::Buf;
+
+use crate::{
+    Result,
+    evm::Fetch,
+    state::{Account, State},
+};
+
+#[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
+#[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
+pub trait Chain {
+    async fn get(&self, acc: &Acc, key: &Int) -> eyre::Result<Int>;
+    async fn acc(&self, acc: &Acc) -> eyre::Result<Account>;
+    async fn code(&self, acc: &Acc) -> eyre::Result<(Buf, Int)>;
+    async fn nonce(&self, acc: &Acc) -> eyre::Result<u64>;
+    async fn balance(&self, acc: &Acc) -> eyre::Result<Int>;
+    async fn head(&self, number: u64) -> eyre::Result<Head>;
+    async fn block(&self, number: u64) -> eyre::Result<(Head, Vec<Tx>)>;
+}
+
+pub async fn fetch(f: Fetch, state: &mut impl State, chain: &impl Chain) -> Result<()> {
+    match f {
+        Fetch::Account(acc) => {
+            let account = chain.acc(&acc).await?;
+            *state.acc_mut(&acc) = account;
+        }
+        Fetch::Balance(acc) => {
+            let account = chain.acc(&acc).await?;
+            *state.acc_mut(&acc) = account;
+        }
+        Fetch::Nonce(acc) => {
+            let account = chain.acc(&acc).await?;
+            *state.acc_mut(&acc) = account;
+        }
+        Fetch::Code(acc) => {
+            let account = chain.acc(&acc).await?;
+            *state.acc_mut(&acc) = account;
+        }
+        Fetch::BlockHash(number) => {
+            let head = chain.head(number).await?;
+            state.hash(number, head.hash);
+        }
+        Fetch::StateCell(acc, key) => {
+            let val = chain.get(&acc, &key).await?;
+            state.init(&acc, &key, val);
+        }
+    }
+    Ok(())
+}

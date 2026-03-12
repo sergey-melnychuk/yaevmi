@@ -15,7 +15,8 @@ pub fn pop(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult
 pub fn mload(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<()> {
     evm.gas.take(3)?;
     let [offset] = evm.peek_usize()?;
-    let (data, _) = evm.mem_get(offset..offset + 32)?;
+    evm.mem_expand(offset, 32)?;
+    let (data, _) = evm.mem_get(offset, 32)?;
     let int = Int::from(data);
     evm.push(int)?;
     Ok(())
@@ -25,7 +26,7 @@ pub fn mstore(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmRes
     evm.gas.take(3)?;
     let [offset, value] = evm.peek()?;
     let offset = offset.as_usize();
-    evm.mem_put(offset..offset + 32, value.as_ref())?;
+    evm.mem_put(offset, 32, value.as_ref())?;
     Ok(())
 }
 
@@ -33,7 +34,7 @@ pub fn mstore8(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmRe
     evm.gas.take(3)?;
     let [offset, value] = evm.peek()?;
     let (offset, value) = (offset.as_usize(), value.as_u8());
-    evm.mem_put(offset..offset + 1, &[value])?;
+    evm.mem_put(offset, 1, &[value])?;
     Ok(())
 }
 
@@ -207,11 +208,9 @@ pub fn tstore(evm: &mut Evm, _: &Context, _: &Call, state: &mut dyn State) -> Ev
 pub fn mcopy(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<()> {
     evm.gas.take(3)?;
     let [dest_offset, offset, size] = evm.peek_usize()?;
-
-    let (data, pad) = evm.mem_get(offset..offset + size)?;
+    let (data, pad) = evm.mem_get(offset, size)?;
     let mut copy = vec![0; data.len() + pad];
     copy[..data.len()].copy_from_slice(data);
-
-    evm.mem_put(dest_offset..dest_offset + size, &copy)?;
+    evm.mem_put(dest_offset, size, &copy)?;
     Ok(())
 }
