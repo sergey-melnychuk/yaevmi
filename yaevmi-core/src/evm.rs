@@ -255,7 +255,6 @@ impl Evm {
         };
         let (_name, f) = OPS[op as usize];
         let result = f(self, ctx, call, state);
-        self.pc += 1;
         result.map(|_| StepResult::Ok).or_else(|evm_yield| {
             Ok(match evm_yield {
                 EvmYield::Halt(reason) => StepResult::Halt(reason),

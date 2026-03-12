@@ -41,8 +41,12 @@ pub async fn fetch(f: Fetch, state: &mut impl State, chain: &impl Chain) -> Resu
             *state.acc_mut(&acc) = account;
         }
         Fetch::BlockHash(number) => {
-            let head = chain.head(number).await?;
-            state.hash(number, head.hash);
+            let hash = chain
+                .head(number)
+                .await
+                .map(|head| head.hash)
+                .unwrap_or(Int::ZERO);
+            state.hash(number, hash);
         }
         Fetch::StateCell(acc, key) => {
             let val = chain.get(&acc, &key).await?;

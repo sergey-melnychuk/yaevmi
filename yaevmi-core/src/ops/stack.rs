@@ -14,10 +14,14 @@ pub fn push(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResul
         evm.gas.take(3)?;
         let lo = evm.pc + 1;
         let hi = evm.pc + 1 + len;
-        if hi > evm.code.len() {
-            return Err(EvmYield::Halt(HaltReason::BadOpcode(op)));
+        if lo >= evm.code.len() {
+            Int::ZERO
+        } else {
+            let available = &evm.code[lo..hi.min(evm.code.len())];
+            let mut buf = [0u8; 32];
+            buf[32 - len..32 - len + available.len()].copy_from_slice(available);
+            Int::from(&buf[..])
         }
-        Int::from(&evm.code[lo..hi])
     };
     evm.push(int)?;
     evm.pc += len;

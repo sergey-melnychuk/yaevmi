@@ -291,11 +291,17 @@ async fn test_shallow_stack() {
     );
     let file: dto::TestFile =
         serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+    let mut failed = 0;
     for (name, tc) in &file {
         for result in run_case(tc, "Cancun").await {
-            assert!(result.is_ok(), "{name}: {}", result.unwrap_err());
+            //assert!(result.is_ok(), "{name}: {}", result.unwrap_err());
+            if let Err(e) = result {
+                println!("FAIL: {name}: {e}");
+                failed += 1;
+            }
         }
     }
+    assert!(failed == 0, "shallowStack.json failed");
 }
 
 /// Run every test in GeneralStateTests/ for the Cancun fork.
@@ -360,9 +366,11 @@ async fn test_general_state_cancun() -> eyre::Result<()> {
         println!("(skipped {} more failures)", left);
     }
 
-    let passed = total - failed.len();
     println!("\n=== GeneralStateTests/{FORK} ===");
-    println!("passed: {passed}/{total}");
-    assert!(passed == total, "GeneralStateTests/{FORK} failed");
+    println!("passed: {}", total - failed.len());
+    println!("failed: {}", failed.len());
+    println!(" TOTAL: {total}");
+
+    assert!(failed.is_empty(), "GeneralStateTests/{FORK} failed");
     Ok(())
 }

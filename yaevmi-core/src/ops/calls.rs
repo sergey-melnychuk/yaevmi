@@ -56,8 +56,7 @@ pub fn call(evm: &mut Evm, ctx: &Context, _: &Call, state: &mut dyn State) -> Ev
     let address: Acc = address.to();
 
     // EIP-2929: warm/cold address access
-    let warm = state.warm_acc(&address);
-    let access_cost: i64 = if warm { 100 } else { 2600 };
+    let access_cost: i64 = if state.warm_acc(&address) { 2600 } else { 100 };
     evm.gas.take(access_cost)?;
 
     // Memory expansion for both args and return regions
@@ -70,9 +69,12 @@ pub fn call(evm: &mut Evm, ctx: &Context, _: &Call, state: &mut dyn State) -> Ev
         evm.gas.take(9000)?;
     }
 
-    // New account cost (sending value to non-existent account)
-    let account_exists = state.balance(&address).is_some();
-    if has_value && !account_exists {
+    // New account cost (sending value to dead account per EIP-161)
+    let is_empty = state
+        .acc(&address)
+        .map(|a| a.value.is_zero() && a.nonce.is_zero() && a.code.0.0.is_empty())
+        .unwrap_or(true);
+    if has_value && is_empty {
         evm.gas.take(25000)?;
     }
 
@@ -116,8 +118,7 @@ pub fn callcode(evm: &mut Evm, ctx: &Context, _: &Call, state: &mut dyn State) -
     let (ret_offset, ret_size) = (ret_offset.as_usize(), ret_size.as_usize());
     let address: Acc = address.to();
 
-    let warm = state.warm_acc(&address);
-    let access_cost: i64 = if warm { 100 } else { 2600 };
+    let access_cost: i64 = if state.warm_acc(&address) { 2600 } else { 100 };
     evm.gas.take(access_cost)?;
 
     evm.mem_expand(args_offset, args_size)?;
@@ -163,14 +164,25 @@ pub fn r#return(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmR
     Err(EvmYield::Return(ret))
 }
 
-pub fn delegatecall(evm: &mut Evm, ctx: &Context, _: &Call, state: &mut dyn State) -> EvmResult<()> {
-    let [gas_arg, address, args_offset, args_size, ret_offset, ret_size] = evm.peek()?;
+pub fn delegatecall(
+    evm: &mut Evm,
+    ctx: &Context,
+    _: &Call,
+    state: &mut dyn State,
+) -> EvmResult<()> {
+    let [
+        gas_arg,
+        address,
+        args_offset,
+        args_size,
+        ret_offset,
+        ret_size,
+    ] = evm.peek()?;
     let (args_offset, args_size) = (args_offset.as_usize(), args_size.as_usize());
     let (ret_offset, ret_size) = (ret_offset.as_usize(), ret_size.as_usize());
     let address: Acc = address.to();
 
-    let warm = state.warm_acc(&address);
-    let access_cost: i64 = if warm { 100 } else { 2600 };
+    let access_cost: i64 = if state.warm_acc(&address) { 2600 } else { 100 };
     evm.gas.take(access_cost)?;
 
     evm.mem_expand(args_offset, args_size)?;
@@ -230,13 +242,19 @@ pub fn create2(evm: &mut Evm, ctx: &Context, _: &Call, _: &mut dyn State) -> Evm
 }
 
 pub fn staticcall(evm: &mut Evm, ctx: &Context, _: &Call, state: &mut dyn State) -> EvmResult<()> {
-    let [gas_arg, address, args_offset, args_size, ret_offset, ret_size] = evm.peek()?;
+    let [
+        gas_arg,
+        address,
+        args_offset,
+        args_size,
+        ret_offset,
+        ret_size,
+    ] = evm.peek()?;
     let (args_offset, args_size) = (args_offset.as_usize(), args_size.as_usize());
     let (ret_offset, ret_size) = (ret_offset.as_usize(), ret_size.as_usize());
     let address: Acc = address.to();
 
-    let warm = state.warm_acc(&address);
-    let access_cost: i64 = if warm { 100 } else { 2600 };
+    let access_cost: i64 = if state.warm_acc(&address) { 2600 } else { 100 };
     evm.gas.take(access_cost)?;
 
     evm.mem_expand(args_offset, args_size)?;
