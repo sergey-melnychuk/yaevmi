@@ -43,8 +43,8 @@ impl serde::Serialize for Buf {
 
 impl<'de> serde::Deserialize<'de> for Buf {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        let s = <&str>::deserialize(d)?;
-        let s = s.strip_prefix("0x").unwrap_or(s);
+        let s = String::deserialize(d)?;
+        let s = s.strip_prefix("0x").unwrap_or(&s);
         let bytes = hex::decode(s).map_err(serde::de::Error::custom)?;
         Ok(Buf(bytes))
     }
