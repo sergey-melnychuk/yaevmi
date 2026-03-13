@@ -5,26 +5,16 @@ use crate::{
 };
 
 pub fn push(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<()> {
-    let op = evm.code[evm.pc];
-    let len = len(op);
-    let int = if len == 0 {
+    let data = evm.data(evm.pc).to_vec();
+    let int = if data.is_empty() {
         evm.gas_charge(2)?;
         Int::ZERO
     } else {
         evm.gas_charge(3)?;
-        let lo = evm.pc + 1;
-        let hi = evm.pc + 1 + len;
-        if lo >= evm.code.len() {
-            Int::ZERO
-        } else {
-            let available = &evm.code[lo..hi.min(evm.code.len())];
-            let mut buf = [0u8; 32];
-            buf[32 - len..32 - len + available.len()].copy_from_slice(available);
-            Int::from(&buf[..])
-        }
+        Int::from(data.as_ref())
     };
     evm.push(int)?;
-    evm.pc += len;
+    evm.pc += data.len();
     Ok(())
 }
 
@@ -50,13 +40,6 @@ pub fn swap(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResul
     let j = i - n;
     evm.stack.swap(i, j);
     Ok(())
-}
-
-pub fn len(op: u8) -> usize {
-    match op {
-        0x60..0x80 => op as usize - 0x60 + 1, // PUSH{1..32}
-        _ => 0,
-    }
 }
 
 pub fn idx(op: u8) -> usize {
@@ -253,25 +236,5 @@ mod tests {
         evm.stack.extend([int(1), int(2)]);
         let result = swap(&mut evm, &ctx(), &call(), &mut state());
         assert!(is_halt(result, HaltReason::StackUnderflow));
-    }
-
-    // --- len ---
-
-    fn check_len(name: &str, len: usize) {
-        if let Some(n) = name
-            .strip_prefix("PUSH")
-            .and_then(|x| x.parse::<usize>().ok())
-        {
-            assert_eq!(len, n, "{}", name)
-        }
-    }
-
-    #[test]
-    fn test_len() {
-        for i in 0u8..=0xffu8 {
-            let (name, _) = crate::ops::OPS[i as usize];
-            let len = super::len(i);
-            check_len(name, len);
-        }
     }
 }

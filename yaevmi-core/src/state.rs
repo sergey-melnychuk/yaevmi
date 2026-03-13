@@ -48,7 +48,7 @@ pub trait State {
     fn emit(&mut self, event: Event) -> usize;
 
     /// Take a state checkpoint; returns an opaque ID that can be passed to `revert_to`.
-    fn checkpoint(&mut self) -> usize {
+    fn checkpoint(&mut self, _depth: usize) -> usize {
         0
     }
     /// Revert all state mutations since the given checkpoint.

@@ -7,7 +7,7 @@ use crate::{
     evm::{CallMode, HaltReason},
 };
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub enum Target {
     Nonce { acc: Acc, val: Int },
     Value { acc: Acc, val: Int },
@@ -17,7 +17,7 @@ pub enum Target {
     Auth { acc: Acc },
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub enum Event {
     WarmKey(Acc, Int),
     WarmAcc(Acc),
@@ -36,13 +36,24 @@ pub enum Event {
     Halt(HaltReason),
     Blob(u64, Int), // EIP-4844 BLOB carrying txs
 
-    Step(usize, (u8, Option<Int>), u64),
-    Full(usize, u8, (u64, u64), Vec<Int>, Buf),
+    Step(Step),
+    Full(Step, Vec<Int>, Buf),
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct Step {
+    pub pc: usize,
+    pub op: u8,
+    pub name: String,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub data: Option<Buf>,
+    pub gas: u64,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Trace {
-    pub id: usize,
+    pub seq: usize,
     pub event: Event,
     pub depth: usize,
     pub reverted: bool,

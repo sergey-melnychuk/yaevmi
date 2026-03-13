@@ -136,7 +136,7 @@ pub fn jumpdest(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmR
     Ok(())
 }
 
-pub fn jump(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<()> {
+pub fn jump(evm: &mut Evm, ctx: &Context, call: &Call, state: &mut dyn State) -> EvmResult<()> {
     evm.gas_charge(8)?;
     let [dst] = evm.peek()?;
     let dst = dst.as_usize();
@@ -148,12 +148,12 @@ pub fn jump(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResul
     if !ok {
         return Err(EvmYield::Halt(HaltReason::BadJump(dst)));
     }
-    evm.gas_charge(1)?; // JUMPDEST
     evm.pc = dst;
+    jumpdest(evm, ctx, call, state)?;
     Ok(())
 }
 
-pub fn jumpi(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<()> {
+pub fn jumpi(evm: &mut Evm, ctx: &Context, call: &Call, state: &mut dyn State) -> EvmResult<()> {
     evm.gas_charge(10)?;
     let [val, dst] = evm.peek()?;
     if val.is_zero() {
@@ -168,8 +168,8 @@ pub fn jumpi(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResu
     if !ok {
         return Err(EvmYield::Halt(HaltReason::BadJump(dst)));
     }
-    evm.gas_charge(1)?; // JUMPDEST
     evm.pc = dst;
+    jumpdest(evm, ctx, call, state)?;
     Ok(())
 }
 
@@ -189,7 +189,7 @@ pub fn msize(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResu
 
 pub fn gas(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<()> {
     evm.gas_charge(2)?;
-    let gas = evm.gas.remaining();
+    let gas = evm.gas_remaining();
     evm.push((gas as usize).into())?;
     Ok(())
 }

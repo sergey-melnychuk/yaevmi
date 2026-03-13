@@ -56,6 +56,7 @@ pub struct Cache {
     created: Vec<Acc>,
     destroyed: Vec<Acc>,
     hash: HashMap<u64, Int>,
+    depth: usize,
     pub logs: Vec<(Buf, Vec<Int>)>,
     pub events: Vec<Trace>,
 }
@@ -70,6 +71,7 @@ impl Cache {
             created: vec![],
             destroyed: vec![],
             hash: HashMap::new(),
+            depth: 0,
             logs: vec![],
             events: vec![],
         }
@@ -337,15 +339,16 @@ impl State for Cache {
     fn emit(&mut self, event: Event) -> usize {
         let id = self.events.len();
         self.events.push(Trace {
-            id,
+            seq: id,
             event,
-            depth: 0,
+            depth: self.depth,
             reverted: false,
         });
         id
     }
 
-    fn checkpoint(&mut self) -> usize {
+    fn checkpoint(&mut self, depth: usize) -> usize {
+        self.depth = depth;
         self.events.len()
     }
 

@@ -302,7 +302,6 @@ async fn test_shallow_stack() {
     let mut failed = 0;
     for (name, tc) in &file {
         for result in run_case(tc, "Cancun").await {
-            //assert!(result.is_ok(), "{name}: {}", result.unwrap_err());
             if let Err(e) = result {
                 println!("FAIL: {name}: {e}");
                 failed += 1;
@@ -313,8 +312,7 @@ async fn test_shallow_stack() {
 }
 
 /// Run every test in GeneralStateTests/ for the Cancun fork.
-/// Prints a pass/fail summary per category. Not run by default.
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_general_state_cancun() -> eyre::Result<()> {
     const FORK: &str = "Cancun";
     let root = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/GeneralStateTests");
@@ -327,10 +325,10 @@ async fn test_general_state_cancun() -> eyre::Result<()> {
         if !category.is_dir() {
             continue;
         }
-        let category_name = category.file_name().and_then(|n| n.to_str()).unwrap_or("");
-        if category_name == "stTimeConsuming" && std::env::var("RUN_TIME_CONSUMING").is_err() {
-            continue;
-        }
+        // let category_name = category.file_name().and_then(|n| n.to_str()).unwrap_or("");
+        // if category_name == "stTimeConsuming" && std::env::var("RUN_TIME_CONSUMING").is_err() {
+        //     continue;
+        // }
         for entry in std::fs::read_dir(&category).unwrap() {
             let file_path = entry.unwrap().path();
             if file_path.extension().and_then(|e| e.to_str()) != Some("json") {
@@ -359,9 +357,8 @@ async fn test_general_state_cancun() -> eyre::Result<()> {
                         }
                     }
                 }
-                println!("DEBUG: Done {file_path:?}: {total}");
                 let count = counter.fetch_add(1, Ordering::Relaxed);
-                println!("DEBUG: Count: {count}");
+                println!("DEBUG: Done ({count}): {file_path:?}: {total}");
                 (total, failed)
             });
             handles.push(handle);

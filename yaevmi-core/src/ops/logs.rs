@@ -17,7 +17,7 @@ pub fn log(evm: &mut Evm, _: &Context, _: &Call, state: &mut dyn State) -> EvmRe
     let (offset, size) = (offset.as_usize(), size.as_usize());
 
     // Avoid overflow during gas calculation - check max size first
-    let max = (evm.gas.remaining() - (n as i64 + 1) * 375) / 8;
+    let max = (evm.gas_remaining() - (n as i64 + 1) * 375) / 8;
     if size as i64 > max {
         return Err(EvmYield::Halt(HaltReason::OutOfGas));
     }

@@ -5,7 +5,7 @@ use crate::{Acc, Call, Int, Result, ops::OPS, state::State};
 
 const K: usize = 1024;
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub enum HaltReason {
     OutOfGas,
     OutOfMemory,
@@ -260,6 +260,10 @@ impl Evm {
         self.pending_key_warmup.push((*acc, *key));
     }
 
+    pub fn gas_remaining(&self) -> i64 {
+        self.gas.remaining() - self.pending_gas_charge
+    }
+
     pub fn gas_charge(&mut self, gas: i64) -> EvmResult<()> {
         if gas > self.gas.remaining() {
             return Err(EvmYield::Halt(HaltReason::OutOfGas));
@@ -318,6 +322,17 @@ impl Evm {
         Ok((&self.memory[lo..hi], pad))
     }
 
+    pub fn data(&self, pc: usize) -> &[u8] {
+        let op = self.code[pc];
+        let len = match op {
+            0x60..0x80 => op as usize - 0x60 + 1, // PUSH{1..32}
+            _ => 0,
+        };
+        let lo = (pc + 1).min(self.code.len());
+        let hi = (pc + 1 + len).min(self.code.len());
+        &self.code[lo..hi]
+    }
+
     pub fn step(
         &mut self,
         ctx: &Context,
@@ -328,16 +343,59 @@ impl Evm {
             return Ok(StepResult::End);
         };
         let (_name, f) = OPS[op as usize];
+
+        // use trace::{Event, Step};
+        // let pc = self.pc;
+        // let op = self.code[pc];
+        // let name = name.to_string();
+        // let data = self.data(pc);
+        // let data = if data.is_empty() {
+        //     None
+        // } else {
+        //     Some(data.to_vec().into())
+        // };
+        // let gas = self.gas.remaining().max(0) as u64;
+        // let mut step = Step {
+        //     pc,
+        //     op,
+        //     name,
+        //     data,
+        //     gas,
+        // };
+        // let mut step1 = step.clone();
+
         let result = f(self, ctx, call, state);
-        result.map(|_| StepResult::Ok).or_else(|evm_yield| {
-            Ok(match evm_yield {
-                EvmYield::Halt(reason) => StepResult::Halt(reason),
-                EvmYield::Fetch(fetch) => StepResult::Fetch(fetch),
-                EvmYield::Return(ret) => StepResult::Return(ret),
-                EvmYield::Revert(ret) => StepResult::Revert(ret),
-                EvmYield::Call(call, mode) => StepResult::Call(call, mode),
+        result
+            .map(|_| {
+                self.apply(state);
+                self.pc += 1;
+
+                // let gas = self.gas.remaining().max(0) as u64;
+                // step.gas = gas;
+                // println!("DEBUG: STEP: {}", serde_json::to_string(&step).unwrap());
+                // state.emit(Event::Step(step));
+
+                StepResult::Ok
             })
-        })
+            .or_else(|evm_yield| {
+                Ok(match evm_yield {
+                    EvmYield::Halt(reason) => StepResult::Halt(reason),
+                    EvmYield::Fetch(fetch) => StepResult::Fetch(fetch),
+                    EvmYield::Return(ret) => StepResult::Return(ret),
+                    EvmYield::Revert(ret) => StepResult::Revert(ret),
+                    EvmYield::Call(call, mode) => {
+                        self.apply(state);
+                        self.pc += 1;
+
+                        // let gas = self.gas.remaining().max(0) as u64;
+                        // step1.gas = gas;
+                        // println!("DEBUG: STEP: {}", serde_json::to_string(&step1).unwrap());
+                        // state.emit(Event::Step(step1));
+
+                        StepResult::Call(call, mode)
+                    }
+                })
+            })
     }
 }
 

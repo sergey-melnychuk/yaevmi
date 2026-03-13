@@ -50,6 +50,11 @@ impl Executor {
         state: &mut impl State,
         chain: &impl Chain,
     ) -> Result<CallResult> {
+        // println!("DEBUG: ---");
+        // println!(
+        //     "DEBUG: RUN: {:?}",
+        //     serde_json::to_string(&self.call).unwrap()
+        // );
         if self.callstack.is_empty() {
             let frame = prepare(head, self.call.clone(), self.mode, None, state, chain).await?;
             self.callstack.push(frame);
@@ -111,8 +116,8 @@ impl Executor {
 
             match this.evm.step(&this.ctx, &this.call, state)? {
                 StepResult::Ok => {
-                    this.evm.apply(state);
-                    this.evm.pc += 1;
+                    // this.evm.apply(state);
+                    // this.evm.pc += 1;
                     continue;
                 }
                 StepResult::End => {
@@ -134,7 +139,7 @@ impl Executor {
                     self.callstack.pop();
                 }
                 StepResult::Call(call, mode) => {
-                    let checkpoint = state.checkpoint();
+                    let checkpoint = state.checkpoint(this.ctx.depth);
                     target = mode.range();
                     subcall_stipend = if !call.eth.is_zero()
                         && matches!(mode, CallMode::Call(..) | CallMode::CallCode(..))
@@ -233,7 +238,7 @@ impl Executor {
                     let is_create = matches!(this.mode, CallMode::Create(_) | CallMode::Create2(_));
                     result = Some(if is_create {
                         let deploy_cost = CODE_DEPOSIT_GAS * ret.len() as i64;
-                        if ret.len() > MAX_CODE_SIZE || this.evm.gas.remaining() < deploy_cost {
+                        if ret.len() > MAX_CODE_SIZE || this.evm.gas_remaining() < deploy_cost {
                             this.evm.gas.drain();
                             let gas = this.evm.gas;
                             state.revert_to(this.checkpoint);
@@ -336,11 +341,12 @@ async fn prepare(
             this,
         }
     };
+    let checkpoint = state.checkpoint(ctx.depth);
     Ok(CallFrame {
         call,
         mode,
         evm,
         ctx,
-        checkpoint: state.checkpoint(),
+        checkpoint,
     })
 }

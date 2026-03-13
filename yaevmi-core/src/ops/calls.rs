@@ -10,7 +10,7 @@ use crate::{
 
 /// Allocate gas for a child frame per EIP-150 (63/64 rule).
 fn sub_call_gas(evm: &Evm) -> u64 {
-    let remaining = evm.gas.remaining().max(0) as u64;
+    let remaining = evm.gas_remaining().max(0) as u64;
     remaining - remaining / 64
 }
 
@@ -92,7 +92,7 @@ pub fn call(evm: &mut Evm, ctx: &Context, _: &Call, state: &mut dyn State) -> Ev
     }
 
     // 63/64 rule: cap the gas arg at available_gas * 63/64
-    let available = evm.gas.remaining().max(0) as u64;
+    let available = evm.gas_remaining().max(0) as u64;
     let max_child = available - available / 64;
     let mut gas = gas_arg.as_u64().min(max_child);
     evm.gas_charge(gas as i64)?;
@@ -151,7 +151,7 @@ pub fn callcode(evm: &mut Evm, ctx: &Context, _: &Call, state: &mut dyn State) -
         evm.gas_charge(9000)?;
     }
 
-    let available = evm.gas.remaining().max(0) as u64;
+    let available = evm.gas_remaining().max(0) as u64;
     let max_child = available - available / 64;
     let mut gas = gas_arg.as_u64().min(max_child);
     evm.gas_charge(gas as i64)?;
@@ -219,7 +219,7 @@ pub fn delegatecall(
     evm::mem_check(args_offset, args_size)?;
     evm::mem_check(ret_offset, ret_size)?;
 
-    let available = evm.gas.remaining().max(0) as u64;
+    let available = evm.gas_remaining().max(0) as u64;
     let max_child = available - available / 64;
     let gas = gas_arg.as_u64().min(max_child);
     evm.gas_charge(gas as i64)?;
@@ -300,7 +300,7 @@ pub fn staticcall(evm: &mut Evm, ctx: &Context, _: &Call, state: &mut dyn State)
     evm::mem_check(args_offset, args_size)?;
     evm::mem_check(ret_offset, ret_size)?;
 
-    let available = evm.gas.remaining().max(0) as u64;
+    let available = evm.gas_remaining().max(0) as u64;
     let max_child = available - available / 64;
     let gas = gas_arg.as_u64().min(max_child);
     evm.gas_charge(gas as i64)?;
