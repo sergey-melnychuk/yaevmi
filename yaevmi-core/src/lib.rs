@@ -9,6 +9,8 @@ pub use yaevmi_base::{
 };
 use yaevmi_misc::buf::Buf;
 
+use crate::evm::Fetch;
+
 pub mod aux;
 pub mod cache;
 pub mod chain;
@@ -22,10 +24,12 @@ pub mod trace;
 
 #[derive(Error, Debug)]
 pub enum Error {
-    #[error("Code missing: {0:?}")]
-    MissingCode(Acc),
+    #[error("Data missing: {0:?}")]
+    MissingData(Fetch),
     #[error("Call result missing")]
     CallResultMissing,
+    #[error("Inconsistent state")]
+    InconsistentState,
     #[error("Generic error: {0}")]
     Generic(#[from] eyre::Report),
     #[error("Internal error: {0}")]

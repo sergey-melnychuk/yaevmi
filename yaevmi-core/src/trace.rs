@@ -12,7 +12,7 @@ pub enum Target {
     Nonce { acc: Acc, val: Int },
     Value { acc: Acc, val: Int },
     Store { acc: Acc, key: Int, val: Int },
-    Temp { key: Int, val: Int },
+    Temp { acc: Acc, key: Int, val: Int },
     Code { acc: Acc, hash: Int },
     Auth { acc: Acc },
 }
@@ -40,7 +40,7 @@ pub enum Event {
     Full(Step, Vec<Int>, Buf),
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct Step {
     pub pc: usize,
     pub op: u8,
@@ -49,6 +49,8 @@ pub struct Step {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub data: Option<Buf>,
     pub gas: u64,
+    pub stack: usize,
+    pub memory: usize,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]

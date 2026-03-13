@@ -6,7 +6,6 @@ use yaevmi_misc::keccak256;
 
 use crate::{
     Call,
-    evm::mem_check,
     evm::{Context, Evm, EvmResult, EvmYield},
     state::State,
 };
@@ -318,9 +317,9 @@ pub fn hash(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResul
     evm.gas_charge(30)?;
     let [offset, size] = evm.peek()?;
     let (offset, size) = (offset.as_usize(), size.as_usize());
-    mem_check(offset, size)?;
-    let (data, _) = evm.mem_get(offset, size)?;
-    let hash = keccak256(data);
+    evm.gas_charge(6 * size.div_ceil(32) as i64)?;
+    let data = evm.mem_get(offset, size)?;
+    let hash = keccak256(&data);
     evm.push(hash)?;
     Ok(())
 }

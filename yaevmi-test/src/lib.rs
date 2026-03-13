@@ -2,6 +2,9 @@
 pub mod eth;
 
 #[cfg(test)]
+pub mod revm;
+
+#[cfg(test)]
 pub mod sol;
 
 // git clone --depth 1 https://github.com/ethereum/tests yaevmi-test/tests 2>&1

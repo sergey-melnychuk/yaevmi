@@ -78,6 +78,7 @@ pub struct Gas {
     pub limit: i64,
     pub spent: i64,
     pub refund: i64,
+    pub finalized: i64,
 }
 
 impl Gas {
@@ -86,6 +87,7 @@ impl Gas {
             limit: gas as i64,
             spent: 0,
             refund: 0,
+            finalized: 0,
         }
     }
 
@@ -118,6 +120,11 @@ impl Gas {
     pub fn drain(&mut self) {
         self.spent = self.limit;
         self.refund = 0;
+    }
+
+    pub fn finalize(&mut self) -> i64 {
+        // TODO: final gas calculations
+        self.finalized
     }
 }
 
@@ -265,7 +272,7 @@ impl Evm {
     }
 
     pub fn gas_charge(&mut self, gas: i64) -> EvmResult<()> {
-        if gas > self.gas.remaining() {
+        if gas > self.gas_remaining() {
             return Err(EvmYield::Halt(HaltReason::OutOfGas));
         }
         self.pending_gas_charge += gas;
@@ -282,19 +289,15 @@ impl Evm {
 
     fn mem_expand(&mut self, offset: usize, size: usize) -> EvmResult<()> {
         mem_check(offset, size)?;
-        let end = offset + size;
         let len = self.memory.len();
+        let end = (offset + size).div_ceil(32) * 32;
         if end > len {
-            self.memory.resize(end, 0);
-
-            let words = len.div_ceil(32) as i64;
-            let old_cost = words * words / 512 + 3 * words;
-
-            let words = end.div_ceil(32) as i64;
-            let new_cost = words * words / 512 + 3 * words;
-
-            let cost = new_cost - old_cost;
-            self.gas_charge(cost)?;
+            let old_words = (len / 32) as i64;
+            let new_words = (end / 32) as i64;
+            let cost = (new_words * new_words / 512 + 3 * new_words)
+                - (old_words * old_words / 512 + 3 * old_words);
+            self.gas_charge(cost)?; // check gas first
+            self.memory.resize(end, 0); // then expand
         }
         Ok(())
     }
@@ -306,20 +309,19 @@ impl Evm {
     }
 
     pub fn mem_put(&mut self, offset: usize, size: usize, source: &[u8]) -> EvmResult<()> {
-        mem_check(offset, size)?;
+        self.mem_expand(offset, size)?;
         self.pending_mem_stores
             .push((offset, size, source.to_vec()));
         Ok(())
     }
 
-    pub fn mem_get(&self, offset: usize, size: usize) -> EvmResult<(&[u8], usize)> {
-        mem_check(offset, size)?;
-        let (lo, hi) = (
-            offset.min(self.memory.len()),
-            (offset + size).min(self.memory.len()),
-        );
-        let pad = hi.max(self.memory.len()) - self.memory.len();
-        Ok((&self.memory[lo..hi], pad))
+    pub fn mem_get(&mut self, offset: usize, size: usize) -> EvmResult<Vec<u8>> {
+        self.mem_expand(offset, size)?;
+        let lo = offset.min(self.memory.len());
+        let hi = (offset + size).min(self.memory.len());
+        let mut ret = vec![0u8; size];
+        ret[..hi - lo].copy_from_slice(&self.memory[lo..hi]);
+        Ok(ret)
     }
 
     pub fn data(&self, pc: usize) -> &[u8] {
@@ -342,56 +344,79 @@ impl Evm {
         let Some(op) = self.code.get(self.pc).copied() else {
             return Ok(StepResult::End);
         };
-        let (_name, f) = OPS[op as usize];
+        let (name, f) = OPS[op as usize];
 
-        // use trace::{Event, Step};
-        // let pc = self.pc;
-        // let op = self.code[pc];
-        // let name = name.to_string();
-        // let data = self.data(pc);
-        // let data = if data.is_empty() {
-        //     None
-        // } else {
-        //     Some(data.to_vec().into())
-        // };
-        // let gas = self.gas.remaining().max(0) as u64;
-        // let mut step = Step {
-        //     pc,
-        //     op,
-        //     name,
-        //     data,
-        //     gas,
-        // };
-        // let mut step1 = step.clone();
+        use crate::trace::{Event, Step};
+        let pc = self.pc;
+        let op = self.code[pc];
+        let name = name.to_string();
+        let data = self.data(pc);
+        let data = if data.is_empty() {
+            None
+        } else {
+            Some(data.to_vec().into())
+        };
+        let gas = self.gas.remaining().max(0) as u64;
+        let mut step = Step {
+            pc,
+            op,
+            name,
+            data,
+            gas,
+            stack: self.stack.len(),
+            memory: self.memory.len(),
+        };
+        let mut step1 = step.clone();
 
         let result = f(self, ctx, call, state);
         result
             .map(|_| {
                 self.apply(state);
-                self.pc += 1;
-
-                // let gas = self.gas.remaining().max(0) as u64;
-                // step.gas = gas;
-                // println!("DEBUG: STEP: {}", serde_json::to_string(&step).unwrap());
-                // state.emit(Event::Step(step));
-
+                if !is_jump(op) {
+                    self.pc += 1;
+                }
+                let gas = self.gas.remaining().max(0) as u64;
+                step.gas = gas;
+                step.stack = self.stack.len();
+                step.memory = self.memory.len();
+                state.emit(Event::Step(step));
                 StepResult::Ok
             })
             .or_else(|evm_yield| {
                 Ok(match evm_yield {
-                    EvmYield::Halt(reason) => StepResult::Halt(reason),
                     EvmYield::Fetch(fetch) => StepResult::Fetch(fetch),
-                    EvmYield::Return(ret) => StepResult::Return(ret),
-                    EvmYield::Revert(ret) => StepResult::Revert(ret),
+                    EvmYield::Halt(reason) => {
+                        // println!("DEBUG: HALT: {reason:?}");
+                        StepResult::Halt(reason)
+                    }
+                    EvmYield::Return(ret) => {
+                        self.apply(state);
+                        let gas = self.gas.remaining().max(0) as u64;
+                        step1.gas = gas;
+                        step1.stack = self.stack.len();
+                        step1.memory = self.memory.len();
+                        state.emit(Event::Step(step1));
+                        StepResult::Return(ret)
+                    }
+                    EvmYield::Revert(ret) => {
+                        self.apply(state);
+                        let gas = self.gas.remaining().max(0) as u64;
+                        step1.gas = gas;
+                        step1.stack = self.stack.len();
+                        step1.memory = self.memory.len();
+                        state.emit(Event::Step(step1));
+                        StepResult::Revert(ret)
+                    }
                     EvmYield::Call(call, mode) => {
                         self.apply(state);
-                        self.pc += 1;
-
-                        // let gas = self.gas.remaining().max(0) as u64;
-                        // step1.gas = gas;
-                        // println!("DEBUG: STEP: {}", serde_json::to_string(&step1).unwrap());
-                        // state.emit(Event::Step(step1));
-
+                        if !is_jump(op) {
+                            self.pc += 1;
+                        }
+                        let gas = self.gas.remaining().max(0) as u64;
+                        step1.gas = gas;
+                        step1.stack = self.stack.len();
+                        step1.memory = self.memory.len();
+                        state.emit(Event::Step(step1));
                         StepResult::Call(call, mode)
                     }
                 })
@@ -404,4 +429,8 @@ pub fn mem_check(offset: usize, size: usize) -> EvmResult<()> {
         return Ok(());
     }
     Err(EvmYield::Halt(HaltReason::OutOfMemory))
+}
+
+fn is_jump(op: u8) -> bool {
+    op == 0x56 || op == 0x57
 }

@@ -27,7 +27,7 @@ pub fn create(evm: &mut Evm, ctx: &Context, _: &Call, state: &mut dyn State) -> 
     };
     let address = create_address(&ctx.this, nonce);
 
-    let (data, _pad) = evm.mem_get(offset, size)?;
+    let data = evm.mem_get(offset, size)?;
     let data: Vec<u8> = data.to_vec();
     let gas = sub_call_gas(evm);
     evm.gas_charge(gas as i64)?;
@@ -102,7 +102,7 @@ pub fn call(evm: &mut Evm, ctx: &Context, _: &Call, state: &mut dyn State) -> Ev
         gas += 2300;
     }
 
-    let (data, _pad) = evm.mem_get(args_offset, args_size)?;
+    let data = evm.mem_get(args_offset, args_size)?;
 
     let call = Call {
         by: ctx.this,
@@ -160,7 +160,7 @@ pub fn callcode(evm: &mut Evm, ctx: &Context, _: &Call, state: &mut dyn State) -
         gas += 2300;
     }
 
-    let (data, _pad) = evm.mem_get(args_offset, args_size)?;
+    let data = evm.mem_get(args_offset, args_size)?;
 
     let call = Call {
         by: ctx.this,
@@ -180,10 +180,8 @@ pub fn callcode(evm: &mut Evm, ctx: &Context, _: &Call, state: &mut dyn State) -
 
 pub fn r#return(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<()> {
     let [offset, size] = evm.peek_usize()?;
-    let (mem, pad) = evm.mem_get(offset, size)?;
-    let mut ret = vec![0; mem.len() + pad];
-    ret[..mem.len()].copy_from_slice(mem);
-    Err(EvmYield::Return(ret))
+    let mem = evm.mem_get(offset, size)?;
+    Err(EvmYield::Return(mem.to_vec()))
 }
 
 pub fn delegatecall(
@@ -224,7 +222,7 @@ pub fn delegatecall(
     let gas = gas_arg.as_u64().min(max_child);
     evm.gas_charge(gas as i64)?;
 
-    let (data, _pad) = evm.mem_get(args_offset, args_size)?;
+    let data = evm.mem_get(args_offset, args_size)?;
 
     let call = Call {
         by: ctx.this,
@@ -251,7 +249,7 @@ pub fn create2(evm: &mut Evm, ctx: &Context, _: &Call, _: &mut dyn State) -> Evm
     let word_cost = 8 * (size as i64 + 31) / 32;
     evm.gas_charge(word_cost)?;
 
-    let (data, _pad) = evm.mem_get(offset, size)?;
+    let data = evm.mem_get(offset, size)?;
     let data: Vec<u8> = data.to_vec();
     let init_code_hash = Int::from(keccak256(&data).as_ref());
     let address = create2_address(&ctx.this, &salt, &init_code_hash);
@@ -305,7 +303,7 @@ pub fn staticcall(evm: &mut Evm, ctx: &Context, _: &Call, state: &mut dyn State)
     let gas = gas_arg.as_u64().min(max_child);
     evm.gas_charge(gas as i64)?;
 
-    let (data, _pad) = evm.mem_get(args_offset, args_size)?;
+    let data = evm.mem_get(args_offset, args_size)?;
 
     let call = Call {
         by: ctx.this,
@@ -322,10 +320,8 @@ pub fn staticcall(evm: &mut Evm, ctx: &Context, _: &Call, state: &mut dyn State)
 
 pub fn revert(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<()> {
     let [offset, size] = evm.peek_usize()?;
-    let (mem, pad) = evm.mem_get(offset, size)?;
-    let mut ret = vec![0; mem.len() + pad];
-    ret[..mem.len()].copy_from_slice(mem);
-    Err(EvmYield::Revert(ret))
+    let mem = evm.mem_get(offset, size)?;
+    Err(EvmYield::Revert(mem.to_vec()))
 }
 
 // TODO: 0xFF SELFDESTRUCT

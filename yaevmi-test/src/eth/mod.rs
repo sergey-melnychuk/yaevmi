@@ -81,7 +81,7 @@ pub fn build_head(tc: &TestCase) -> Head {
         timestamp: tc.env.current_timestamp,
         base_fee: tc.env.current_base_fee.unwrap_or(Int::ZERO),
         prevrandao: hash,
-        chain_id: Int::from(1u32),
+        chain_id: 1u32,
         ..Head::default()
     }
 }
@@ -167,37 +167,12 @@ pub async fn run_entry(tc: &TestCase, entry: &PostEntry) -> eyre::Result<()> {
     call.gas = gas_limit - intrinsic;
 
     // 1. Increment sender nonce
-    let sender_nonce = state.nonce(&sender).unwrap_or(Int::ZERO).as_u64();
     state.inc_nonce(&sender, Int::ONE);
 
     // 2. Upfront deduction: gas_limit * max_fee + value
     let upfront = U256::from(gas_limit) * max_fee + i2u(value);
     let bal = i2u(state.balance(&sender).unwrap_or(Int::ZERO));
     state.set_value(&sender, u2i(bal - upfront));
-
-    // 3. Determine call mode and handle value transfer / account creation
-    let mode = if recipient.is_zero() {
-        let addr = yaevmi_core::aux::create_address(&sender, sender_nonce);
-        state.create(
-            addr,
-            yaevmi_core::state::Account {
-                value: Int::ZERO,
-                nonce: Int::ONE,
-                code: (yaevmi_misc::buf::Buf::default(), Int::ZERO),
-            },
-        );
-        if !value.is_zero() {
-            let bal = i2u(state.balance(&addr).unwrap_or(Int::ZERO));
-            state.set_value(&addr, u2i(bal + i2u(value)));
-        }
-        yaevmi_core::evm::CallMode::Create(addr)
-    } else {
-        if !value.is_zero() {
-            let bal = i2u(state.balance(&recipient).unwrap_or(Int::ZERO));
-            state.set_value(&recipient, u2i(bal + i2u(value)));
-        }
-        yaevmi_core::evm::CallMode::Call(0, 0)
-    };
 
     // EIP-2929: pre-warm sender, recipient, and access list
     state.warm_acc(&sender);
@@ -212,11 +187,11 @@ pub async fn run_entry(tc: &TestCase, entry: &PostEntry) -> eyre::Result<()> {
     }
 
     // Execute — reverts/halts return Ok(Done { status: 0 }), only infra errors are Err
-    let mut exe = Executor::new(call, mode);
+    let mut exe = Executor::new(call);
     let gas = match exe.run(head, &mut state, &EmptyChain).await {
         Ok(CallResult::Created { addr, code, gas }) => {
-            if !code.is_empty() {
-                let hash = Int::from(yaevmi_misc::keccak256(&code).as_ref());
+            if !code.0.is_empty() {
+                let hash = Int::from(yaevmi_misc::keccak256(code.as_slice()).as_ref());
                 state.acc_mut(&addr).code = (code.into(), hash);
             }
             gas
@@ -228,6 +203,7 @@ pub async fn run_entry(tc: &TestCase, entry: &PostEntry) -> eyre::Result<()> {
                 limit: gas_limit as i64,
                 spent: gas_limit as i64,
                 refund: 0,
+                finalized: 0,
             }
         }
     };
@@ -368,7 +344,8 @@ async fn test_general_state_cancun() -> eyre::Result<()> {
     let mut total: usize = 0;
     let mut failed = Vec::new();
     let results: Result<Vec<_>, _> = futures::future::try_join_all(handles).await;
-    for (n, fs) in results? {
+    let results = results?;
+    for (n, fs) in results {
         total += n;
         failed.extend_from_slice(&fs);
     }

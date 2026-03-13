@@ -16,7 +16,7 @@ contract Count {
         count -= 1;
     }
 
-    function set(uint256 _count) public {
-        count = _count;
+    function set(uint256 count_) public {
+        count = count_;
     }
 }

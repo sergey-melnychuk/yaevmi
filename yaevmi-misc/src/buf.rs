@@ -1,6 +1,6 @@
 use std::fmt;
 
-#[derive(Clone, Default)]
+#[derive(Clone, Default, PartialEq, Eq)]
 pub struct Buf(pub Vec<u8>);
 
 impl Buf {

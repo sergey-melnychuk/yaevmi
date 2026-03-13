@@ -18,6 +18,29 @@ pub fn invalid(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmRe
     Err(EvmYield::Halt(HaltReason::BadOpcode(op)))
 }
 
+pub fn text(code: &[u8]) -> Vec<String> {
+    let mut ret = Vec::with_capacity(code.len());
+    let mut pc = 0;
+    while pc < code.len() {
+        let op = code[pc];
+        let (name, _) = OPS[op as usize];
+        let data = match op {
+            0x60..0x80 => {
+                let len = op as usize - 0x60 + 1; // PUSH{1..32}
+                let lo = (pc + 1).min(code.len());
+                let hi = (pc + 1 + len).min(code.len());
+                pc += len;
+                Some(hex::encode(&code[lo..hi]))
+            }
+            _ => None,
+        };
+        let data = data.map(|d| format!(" [{d}]")).unwrap_or_default();
+        ret.push(format!("{pc:04x}: {name:16}{data}"));
+        pc += 1;
+    }
+    ret
+}
+
 pub const OPS: [(&str, Handler); 256] = [
     // 0x00
     ("STOP", basic::stop),
@@ -351,10 +374,10 @@ pub mod tests {
         fn init(&mut self, _: &Acc, _: &Int, _: Int) -> Int {
             Int::ZERO
         }
-        fn tget(&mut self, _: &Int) -> Option<Int> {
+        fn tget(&mut self, _: &Acc, _: &Int) -> Option<Int> {
             None
         }
-        fn tput(&mut self, _: Int, _: Int) -> Option<Int> {
+        fn tput(&mut self, _: Acc, _: Int, _: Int) -> Option<Int> {
             None
         }
         fn inc_nonce(&mut self, _: &Acc, _: Int) -> Int {

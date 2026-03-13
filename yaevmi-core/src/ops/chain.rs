@@ -68,10 +68,10 @@ pub fn calldatasize(evm: &mut Evm, _: &Context, call: &Call, _: &mut dyn State) 
 pub fn calldatacopy(evm: &mut Evm, _: &Context, call: &Call, _: &mut dyn State) -> EvmResult<()> {
     evm.gas_charge(3)?;
     let [dest_offset, offset, size] = evm.peek_usize()?;
-    mem_check(offset, size)?;
     mem_check(dest_offset, size)?;
+    evm.gas_charge(3 * size.div_ceil(32) as i64)?;
     let lo = offset.min(call.data.0.len());
-    let hi = (offset + size).min(call.data.0.len());
+    let hi = offset.saturating_add(size).min(call.data.0.len());
     let len = (lo..hi).len();
     if len > 0 {
         let data = &call.data.0[lo..hi];
@@ -95,20 +95,14 @@ pub fn codesize(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmR
 pub fn codecopy(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<()> {
     evm.gas_charge(3)?;
     let [dest_offset, offset, size] = evm.peek_usize()?;
-    mem_check(offset, size)?;
     mem_check(dest_offset, size)?;
+    evm.gas_charge(3 * size.div_ceil(32) as i64)?;
     let lo = offset.min(evm.code.len());
-    let hi = (offset + size).min(evm.code.len());
+    let hi = offset.saturating_add(size).min(evm.code.len());
     let len = (lo..hi).len();
-    if len > 0 {
-        let data = evm.code[lo..hi].to_vec();
-        evm.mem_put(dest_offset, len, &data)?;
-    }
-    if len < size {
-        let pad = size - (lo..hi).len();
-        let data = vec![0; pad];
-        evm.mem_put(dest_offset + len, size - len, &data)?;
-    }
+    let mut ret = vec![0u8; size];
+    ret[0..len].copy_from_slice(&evm.code[lo..hi]);
+    evm.mem_put(dest_offset, size, &ret)?;
     Ok(())
 }
 
@@ -146,9 +140,10 @@ pub fn extcodecopy(evm: &mut Evm, _: &Context, _: &Call, state: &mut dyn State) 
         evm.warm_acc(&acc);
         evm.gas_charge(2_500)?;
     }
+    evm.gas_charge(3 * size.div_ceil(32) as i64)?;
 
     let lo = offset.min(code.0.len());
-    let hi = (offset + size).min(code.0.len());
+    let hi = offset.saturating_add(size).min(code.0.len());
     let len = (lo..hi).len();
     if len > 0 {
         let data = &code.0[lo..hi];
@@ -173,6 +168,7 @@ pub fn returndatacopy(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -
     let [dest_offset, offset, size] = evm.peek_usize()?;
     mem_check(offset, size)?;
     mem_check(dest_offset, size)?;
+    evm.gas_charge(3 * size.div_ceil(32) as i64)?;
 
     // EVM spec: halt if copy range exceeds return data buffer
     if offset.saturating_add(size) > evm.ret.len() {
@@ -244,7 +240,7 @@ pub fn gaslimit(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmR
 
 pub fn chainid(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<()> {
     evm.gas_charge(2)?;
-    evm.push(evm.head.chain_id)?;
+    evm.push(evm.head.chain_id.into())?;
     Ok(())
 }
 

@@ -14,7 +14,7 @@ pub struct Head {
     pub timestamp: Int,
     pub base_fee: Int,
     pub blob_base_fee: Int,
-    pub chain_id: Int,
+    pub chain_id: u32,
     pub blobhash: Int,
     pub prevrandao: Int,
 }

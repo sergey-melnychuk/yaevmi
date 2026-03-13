@@ -80,6 +80,7 @@ mod tests {
         let head = Head::default();
         let mut evm = Evm::new(head, vec![0x5F], 1000); // PUSH0
         push(&mut evm, &ctx(), &call(), &mut state()).unwrap();
+        evm.apply(&mut state());
         assert_eq!(evm.stack, vec![Int::ZERO]);
         assert_eq!(evm.pc, 0);
     }
@@ -89,6 +90,7 @@ mod tests {
         let head = Head::default();
         let mut evm = Evm::new(head, vec![0x60, 0x42], 1000); // PUSH1 0x42
         push(&mut evm, &ctx(), &call(), &mut state()).unwrap();
+        evm.apply(&mut state());
         assert_eq!(evm.stack, vec![int(0x42)]);
         assert_eq!(evm.pc, 1);
     }
@@ -98,6 +100,7 @@ mod tests {
         let head = Head::default();
         let mut evm = Evm::new(head, vec![0x61, 0x01, 0x02], 1000); // PUSH2 0x0102
         push(&mut evm, &ctx(), &call(), &mut state()).unwrap();
+        evm.apply(&mut state());
         assert_eq!(evm.stack, vec![int(0x0102)]);
         assert_eq!(evm.pc, 2);
     }
@@ -109,6 +112,7 @@ mod tests {
         let head = Head::default();
         let mut evm = Evm::new(head, code, 1000);
         push(&mut evm, &ctx(), &call(), &mut state()).unwrap();
+        evm.apply(&mut state());
         assert_eq!(evm.stack.len(), 1);
         assert_eq!(evm.pc, 32);
         let expected: Vec<u8> = (1u8..=32).collect();
@@ -120,8 +124,11 @@ mod tests {
         // PUSH2 with only 1 byte of immediate — should halt BadOpcode
         let head = Head::default();
         let mut evm = Evm::new(head, vec![0x61, 0xFF], 1000);
-        let result = push(&mut evm, &ctx(), &call(), &mut state());
-        assert!(is_halt(result, HaltReason::BadOpcode(0x61)));
+        push(&mut evm, &ctx(), &call(), &mut state()).unwrap();
+        evm.apply(&mut state());
+        assert_eq!(evm.stack.len(), 1);
+        assert_eq!(evm.pc, 1);
+        assert_eq!(evm.stack[0], Int::from(0xFF));
     }
 
     // --- DUP ---
@@ -133,6 +140,7 @@ mod tests {
         let mut evm = Evm::new(head, vec![0x80], 1000); // DUP1
         evm.stack.push(a);
         dup(&mut evm, &ctx(), &call(), &mut state()).unwrap();
+        evm.apply(&mut state());
         assert_eq!(evm.stack, vec![a, a]);
         assert_eq!(evm.pc, 0);
     }
@@ -144,6 +152,7 @@ mod tests {
         let mut evm = Evm::new(head, vec![0x81], 1000); // DUP2
         evm.stack.extend([a, b]);
         dup(&mut evm, &ctx(), &call(), &mut state()).unwrap();
+        evm.apply(&mut state());
         assert_eq!(evm.stack, vec![a, b, a]); // copies 2nd from top (a)
         assert_eq!(evm.pc, 0);
     }
@@ -155,6 +164,7 @@ mod tests {
         let mut evm = Evm::new(head, vec![0x8F], 1000); // DUP16
         evm.stack.extend(vals.iter().copied());
         dup(&mut evm, &ctx(), &call(), &mut state()).unwrap();
+        evm.apply(&mut state());
         assert_eq!(evm.stack.len(), 17);
         assert_eq!(*evm.stack.last().unwrap(), int(1)); // copies bottom (16th from top)
     }
@@ -185,6 +195,7 @@ mod tests {
         let mut evm = Evm::new(head, vec![0x90], 1000); // SWAP1
         evm.stack.extend([a, b]);
         swap(&mut evm, &ctx(), &call(), &mut state()).unwrap();
+        evm.apply(&mut state());
         assert_eq!(evm.stack, vec![b, a]); // top swapped with 2nd
         assert_eq!(evm.pc, 0);
     }
@@ -196,6 +207,7 @@ mod tests {
         let mut evm = Evm::new(head, vec![0x91], 1000); // SWAP2
         evm.stack.extend([a, b, c]);
         swap(&mut evm, &ctx(), &call(), &mut state()).unwrap();
+        evm.apply(&mut state());
         assert_eq!(evm.stack, vec![c, b, a]); // top swapped with 3rd
         assert_eq!(evm.pc, 0);
     }
@@ -207,6 +219,7 @@ mod tests {
         let mut evm = Evm::new(head, vec![0x9F], 1000); // SWAP16
         evm.stack.extend(vals.iter().copied());
         swap(&mut evm, &ctx(), &call(), &mut state()).unwrap();
+        evm.apply(&mut state());
         assert_eq!(*evm.stack.last().unwrap(), int(1)); // bottom is now on top
         assert_eq!(evm.stack[0], int(17)); // top is now on bottom
     }

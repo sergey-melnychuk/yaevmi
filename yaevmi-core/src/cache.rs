@@ -43,14 +43,14 @@ enum Revert {
     Store(Acc, Int, Int),
     Nonce(Acc, Int),
     Value(Acc, Int),
-    Temp(Int, Int),
+    Temp(Acc, Int, Int),
     Code(Acc, Int),
 }
 
 #[derive(Default)]
 pub struct Cache {
     accounts: HashMap<Acc, AccountEntry>,
-    transient: HashMap<Int, Int>,
+    transient: HashMap<(Acc, Int), Int>,
     warm_accs: HashSet<Acc>,
     warm_keys: HashSet<(Acc, Int)>,
     created: Vec<Acc>,
@@ -142,19 +142,21 @@ impl State for Cache {
         val
     }
 
-    fn tget(&mut self, key: &Int) -> Option<Int> {
-        let val = self.transient.get(key).copied();
+    fn tget(&mut self, acc: &Acc, key: &Int) -> Option<Int> {
+        let val = self.transient.get(&(*acc, *key)).copied();
         self.emit(Event::Get(Target::Temp {
+            acc: *acc,
             key: *key,
             val: val.unwrap_or_default(),
         }));
         val
     }
 
-    fn tput(&mut self, key: Int, val: Int) -> Option<Int> {
-        let prev = self.transient.insert(key, val);
+    fn tput(&mut self, acc: Acc, key: Int, val: Int) -> Option<Int> {
+        let prev = self.transient.insert((acc, key), val);
         self.emit(Event::Put(
             Target::Temp {
+                acc,
                 key,
                 val: prev.unwrap_or_default(),
             },
@@ -376,7 +378,7 @@ impl State for Cache {
                 }
                 Event::Put(Target::Nonce { acc, val }, _) => Some(Revert::Nonce(*acc, *val)),
                 Event::Put(Target::Value { acc, val }, _) => Some(Revert::Value(*acc, *val)),
-                Event::Put(Target::Temp { key, val }, _) => Some(Revert::Temp(*key, *val)),
+                Event::Put(Target::Temp { acc, key, val }, _) => Some(Revert::Temp(*acc, *key, *val)),
                 Event::Put(Target::Code { acc, hash }, _) => Some(Revert::Code(*acc, *hash)),
                 Event::WarmAcc(acc) => Some(Revert::WarmAcc(*acc)),
                 Event::WarmKey(acc, key) => Some(Revert::WarmKey(*acc, *key)),
@@ -409,11 +411,11 @@ impl State for Cache {
                         entry.account.value = val;
                     }
                 }
-                Revert::Temp(key, val) => {
+                Revert::Temp(acc, key, val) => {
                     if val.is_zero() {
-                        self.transient.remove(&key);
+                        self.transient.remove(&(acc, key));
                     } else {
-                        self.transient.insert(key, val);
+                        self.transient.insert((acc, key), val);
                     }
                 }
                 Revert::Code(_acc, _hash) => {

@@ -16,17 +16,16 @@ pub fn log(evm: &mut Evm, _: &Context, _: &Call, state: &mut dyn State) -> EvmRe
     let [offset, size] = evm.peek()?;
     let (offset, size) = (offset.as_usize(), size.as_usize());
 
-    // Avoid overflow during gas calculation - check max size first
-    let max = (evm.gas_remaining() - (n as i64 + 1) * 375) / 8;
-    if size as i64 > max {
+    let base = 375 + 375 * n as i64;
+    let max = (evm.gas_remaining() - base) / 8;
+    if max < 0 || size > max as usize {
         return Err(EvmYield::Halt(HaltReason::OutOfGas));
     }
 
-    let gas = 375 + 375 * n + 8 * size;
-    evm.gas_charge(gas as i64)?;
+    let gas = base + 8 * size as i64;
+    evm.gas_charge(gas)?;
 
-    let (data, _) = evm.mem_get(offset, size)?;
-    let data = data.to_vec();
+    let data = evm.mem_get(offset, size)?.to_vec();
 
     let topics = evm.stack.iter().rev().skip(2).take(n).cloned().collect();
 

@@ -2,7 +2,7 @@ use yaevmi_misc::buf::Buf;
 
 use crate::{Acc, Head, Int, trace::Event};
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct Account {
     pub value: Int,
     pub nonce: Int,
@@ -14,8 +14,8 @@ pub trait State {
     fn put(&mut self, acc: &Acc, key: &Int, val: Int) -> Option<Int>;
     fn init(&mut self, acc: &Acc, key: &Int, val: Int) -> Int;
 
-    fn tget(&mut self, key: &Int) -> Option<Int>;
-    fn tput(&mut self, key: Int, val: Int) -> Option<Int>;
+    fn tget(&mut self, acc: &Acc, key: &Int) -> Option<Int>;
+    fn tput(&mut self, acc: Acc, key: Int, val: Int) -> Option<Int>;
 
     fn inc_nonce(&mut self, acc: &Acc, nonce: Int) -> Int;
     fn set_value(&mut self, acc: &Acc, value: Int) -> Int;

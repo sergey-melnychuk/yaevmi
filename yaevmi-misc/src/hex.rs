@@ -7,6 +7,7 @@ impl<const N: usize> Hex<N> {
     pub const N: usize = N;
     pub const ZERO: Self = Self::zero();
     pub const ONE: Self = Self::one();
+    pub const MAX: Self = Self::max();
 
     pub const fn new(bytes: [u8; N]) -> Self {
         Self(bytes)
@@ -20,6 +21,10 @@ impl<const N: usize> Hex<N> {
         let mut buf = [0; N];
         buf[N - 1] = 1;
         Self(buf)
+    }
+
+    pub const fn max() -> Self {
+        Self([0xff; N])
     }
 
     pub fn is_zero(&self) -> bool {
@@ -119,6 +124,12 @@ impl<const N: usize> From<u8> for Hex<N> {
     }
 }
 
+impl<const N: usize> From<i32> for Hex<N> {
+    fn from(value: i32) -> Self {
+        Self::from(value as u32)
+    }
+}
+
 impl<const N: usize> Hex<N> {
     pub fn to<const M: usize>(self) -> Hex<M> {
         let mut buffer = [0; M];
@@ -185,6 +196,9 @@ pub const fn parse<const N: usize>(s: &str) -> [u8; N] {
     let offset = N * 2 - s.len();
     let mut ret = [0u8; N];
     let mut j = 0;
+    if s.len() >= 2 && s.as_bytes()[0] == b'0' && s.as_bytes()[1] == b'x' {
+        j = 2;
+    }
     while j < s.len() {
         let c = s.as_bytes()[j];
         let d = match c {
