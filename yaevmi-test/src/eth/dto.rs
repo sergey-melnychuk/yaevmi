@@ -8,15 +8,15 @@ pub type TestFile = HashMap<String, TestCase>;
 
 #[derive(Deserialize)]
 pub struct TestCase {
-    pub env: Env,
-    pub pre: HashMap<Acc, PreAccount>,
+    pub env: TestEnv,
+    pub pre: HashMap<Acc, AccountState>,
     pub transaction: Transaction,
     pub post: HashMap<String, Vec<PostEntry>>,
 }
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct Env {
+pub struct TestEnv {
     pub current_coinbase: Acc,
     pub current_gas_limit: Int,
     pub current_number: Int,
@@ -27,7 +27,7 @@ pub struct Env {
 }
 
 #[derive(Deserialize)]
-pub struct PreAccount {
+pub struct AccountState {
     pub balance: Int,
     pub code: Buf,
     pub nonce: Int,
@@ -64,7 +64,7 @@ pub struct PostEntry {
     pub hash: Int,
     pub logs: Int,
     #[serde(default)]
-    pub state: HashMap<Acc, PreAccount>,
+    pub state: HashMap<Acc, AccountState>,
 }
 
 #[derive(Deserialize)]

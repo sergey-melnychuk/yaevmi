@@ -1,19 +1,21 @@
+use yaevmi_base::math::U256;
 use yaevmi_base::math::lift;
-use yaevmi_base::{dto::Head, math::U256};
 use yaevmi_misc::keccak256;
 
 use yaevmi_misc::buf::Buf;
 
-use crate::aux::create_address;
+use crate::Tx;
+use crate::aux::{create_address, is_precompile};
 use crate::evm::{CallMode, Context, Evm, Fetch, Gas, StepResult};
 use crate::{Acc, Call, Error, Int, Result};
 use crate::{
+    call::Head,
     chain::{Chain, fetch},
     state::{Account, State},
 };
 
 const MAX_CALL_DEPTH: usize = 1024;
-const MAX_STEPS: u64 = 1_000_000;
+const MAX_STEPS: u64 = 10_000_000;
 const MAX_CODE_SIZE: usize = 24_576;
 const CODE_DEPOSIT_GAS: i64 = 200;
 
@@ -59,6 +61,7 @@ impl Executor {
 
     pub async fn run(
         &mut self,
+        tx: Tx,
         head: Head,
         state: &mut impl State,
         chain: &impl Chain,
@@ -73,8 +76,33 @@ impl Executor {
                 return Err(Error::MissingData(Fetch::Nonce(self.call.to)));
             };
             let created = create_address(&self.call.by, nonce.as_u64());
+            // Register the new account (nonce=1, EIP-161) before running init code
+            state.create(
+                created,
+                Account {
+                    value: Int::ZERO,
+                    nonce: Int::ONE,
+                    code: (Buf::default(), Int::ZERO),
+                },
+            );
+            // ETH endowment from creator to new contract
+            if !self.call.eth.is_zero() {
+                let sub = lift(|[a, b]| a - b);
+                let add = lift(|[a, b]| a + b);
+                let by0 = state.balance(&self.call.by).unwrap_or_default();
+                state.set_value(&self.call.by, sub([by0, self.call.eth]));
+                let to0 = state.balance(&created).unwrap_or_default();
+                state.set_value(&created, add([to0, self.call.eth]));
+            }
             CallMode::Create(created)
         } else {
+            // ETH value transfer for top-level CALL (harness already deducted value in upfront)
+            if !self.call.eth.is_zero() {
+                let add = lift(|[a, b]| a + b);
+                let to = state.auth(&self.call.to).unwrap_or(self.call.to);
+                let to0 = state.balance(&to).unwrap_or_default();
+                state.set_value(&to, add([to0, self.call.eth]));
+            }
             CallMode::Call(0, 0)
         };
 
@@ -121,6 +149,8 @@ impl Executor {
                         let return_gas = (gas.limit - gas.spent).max(0).min(gas_sent);
                         this.evm.gas.spent -= return_gas;
                         this.evm.gas.refund += gas.refund;
+                        this.evm.apply(state);
+                        this.evm.pc += 1;
                         target = (0, 0);
                         subcall_stipend = 0;
                         result = None;
@@ -134,6 +164,8 @@ impl Executor {
                         let return_gas = (gas.limit - gas.spent).max(0);
                         this.evm.gas.spent -= return_gas;
                         this.evm.gas.refund += gas.refund;
+                        this.evm.apply(state);
+                        this.evm.pc += 1;
                         this.evm.ret.clear();
                         subcall_stipend = 0;
                     }
@@ -163,6 +195,48 @@ impl Executor {
                     self.callstack.pop();
                 }
                 StepResult::Call(call, mode) => {
+                    /*fn precompile(
+                        evm: &mut Evm,
+                        call: &Call,
+                        mode: &CallMode,
+                    ) -> crate::evm::EvmResult<()> {
+                        let (ok, out, gas_used) =
+                            crate::pre::run(call.to.as_u64(), &call.data.0, call.gas as i64);
+                        if ok {
+                            evm.gas_charge(gas_used)?;
+                            let (ret_offset, ret_size) = mode.range();
+                            let n = ret_size.min(out.len());
+                            if n > 0 {
+                                evm.mem_put(ret_offset, n, &out[..n])?;
+                            }
+                            evm.push(Int::ONE)?;
+                        } else {
+                            evm.gas_charge(call.gas as i64)?;
+                            evm.push(Int::ZERO)?;
+                        }
+                        Ok(())
+                    }*/
+
+                    if is_precompile(&call.to) {
+                        // Precompile runs inline. Replace child-gas reservation with actual used
+                        // (avoids OOG when child_gas > remaining); keep access cost.
+                        let (ok, out, gas_used) =
+                            crate::pre::run(call.to.as_u64(), &call.data.0, call.gas as i64);
+                        this.evm.pending_gas_charge -= call.gas as i64;
+                        this.evm.pending_gas_charge += gas_used;
+                        let status = if ok { Int::ONE } else { Int::ZERO };
+                        let (ret_offset, ret_size) = mode.range();
+                        this.evm.apply(state);
+                        let _ = this.evm.push(status);
+                        if !status.is_zero() && ret_size > 0 {
+                            let n = ret_size.min(out.len());
+                            let _ = this.evm.mem_put(ret_offset, n, &out[..n]);
+                        }
+                        this.evm.apply(state);
+                        this.evm.pc += 1;
+                        continue;
+                    }
+
                     let checkpoint = state.checkpoint(this.ctx.depth);
                     target = mode.range();
                     subcall_stipend = if !call.eth.is_zero()
@@ -317,6 +391,34 @@ impl Executor {
         }
 
         let result = result.ok_or(Error::CallResultMissing)?;
+
+        // For top-level CREATE, store the deployed bytecode into the new account.
+        if let CallResult::Created { addr, ref code, .. } = result
+            && !code.0.is_empty()
+        {
+            let hash = Int::from(keccak256(code.as_slice()).as_ref());
+            state.acc_mut(&addr).code = (code.clone(), hash);
+        }
+
+        // Charge gas: sender pays net_gas * gas_price; coinbase receives the tip.
+        let gas = match &result {
+            CallResult::Done { gas, .. } | CallResult::Created { gas, .. } => *gas,
+        };
+        let effective_refund = gas.refund.min(gas.spent / 5);
+        let net_gas = (gas.spent - effective_refund).max(0) as u64;
+        let mul = lift(|[a, b]| a * b);
+        let sub = lift(|[a, b]| a - b);
+        let add = lift(|[a, b]| a + b);
+        let gas_cost = mul([Int::from(net_gas), tx.gas_price]);
+        let sender_bal = state.balance(&self.call.by).unwrap_or_default();
+        state.set_value(&self.call.by, sub([sender_bal, gas_cost]));
+        let tip = mul([Int::from(net_gas), sub([tx.gas_price, head.base_fee])]);
+        if !tip.is_zero() {
+            let cb_bal = state.balance(&head.coinbase).unwrap_or_default();
+            state.set_value(&head.coinbase, add([cb_bal, tip]));
+        }
+
+        state.apply();
         Ok(result)
     }
 }

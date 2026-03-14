@@ -1,11 +1,9 @@
-use yaevmi_base::{
-    Acc, Int,
-    dto::{Head, Tx},
-};
+use yaevmi_base::{Acc, Int};
 use yaevmi_misc::buf::Buf;
 
 use crate::{
     Result,
+    call::{Head, Tx},
     evm::Fetch,
     state::{Account, State},
 };

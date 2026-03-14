@@ -1,10 +1,11 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::{
+    call::Head,
     state::{Account, State},
     trace::{Event, Target, Trace},
 };
-use yaevmi_base::{Acc, Int, dto::Head, math::lift};
+use yaevmi_base::{Acc, Int, math::lift};
 use yaevmi_misc::buf::Buf;
 
 #[derive(Default)]
@@ -53,8 +54,8 @@ pub struct Cache {
     transient: HashMap<(Acc, Int), Int>,
     warm_accs: HashSet<Acc>,
     warm_keys: HashSet<(Acc, Int)>,
-    created: Vec<Acc>,
-    destroyed: Vec<Acc>,
+    created: HashSet<Acc>,
+    destroyed: HashSet<Acc>,
     hash: HashMap<u64, Int>,
     depth: usize,
     pub logs: Vec<(Buf, Vec<Int>)>,
@@ -68,8 +69,8 @@ impl Cache {
             transient: HashMap::new(),
             warm_accs: HashSet::new(),
             warm_keys: HashSet::new(),
-            created: vec![],
-            destroyed: vec![],
+            created: HashSet::new(),
+            destroyed: HashSet::new(),
             hash: HashMap::new(),
             depth: 0,
             logs: vec![],
@@ -300,21 +301,20 @@ impl State for Cache {
         ));
         self.emit(Event::Create(acc));
         self.accounts.insert(acc, AccountEntry::new(info));
-        self.created.push(acc);
+        self.created.insert(acc);
     }
 
     fn destroy(&mut self, acc: &Acc) {
-        self.accounts.remove(acc);
-        self.destroyed.push(*acc);
+        self.destroyed.insert(*acc);
         self.emit(Event::Delete(*acc));
     }
 
-    fn created(&self) -> &[Acc] {
-        &self.created
+    fn created(&self) -> Vec<Acc> {
+        self.created.iter().cloned().collect()
     }
 
-    fn destroyed(&self) -> &[Acc] {
-        &self.destroyed
+    fn destroyed(&self) -> Vec<Acc> {
+        self.destroyed.iter().cloned().collect()
     }
 
     fn head(&self, number: u64) -> Option<Head> {
@@ -378,7 +378,9 @@ impl State for Cache {
                 }
                 Event::Put(Target::Nonce { acc, val }, _) => Some(Revert::Nonce(*acc, *val)),
                 Event::Put(Target::Value { acc, val }, _) => Some(Revert::Value(*acc, *val)),
-                Event::Put(Target::Temp { acc, key, val }, _) => Some(Revert::Temp(*acc, *key, *val)),
+                Event::Put(Target::Temp { acc, key, val }, _) => {
+                    Some(Revert::Temp(*acc, *key, *val))
+                }
                 Event::Put(Target::Code { acc, hash }, _) => Some(Revert::Code(*acc, *hash)),
                 Event::WarmAcc(acc) => Some(Revert::WarmAcc(*acc)),
                 Event::WarmKey(acc, key) => Some(Revert::WarmKey(*acc, *key)),
@@ -429,5 +431,35 @@ impl State for Cache {
                 }
             }
         }
+    }
+
+    fn apply(&mut self) {
+        let destroyed = std::mem::take(&mut self.destroyed);
+        for acc in destroyed {
+            if let Some(entry) = self.accounts.get_mut(&acc) {
+                entry.account.value = Int::ZERO;
+                entry.account.nonce = Int::ZERO;
+                entry.account.code = (Buf::default(), Int::ZERO);
+            }
+            self.created.remove(&acc);
+        }
+    }
+}
+
+pub type Env = Vec<(Acc, Account, Vec<(Int, Int)>)>;
+
+impl Cache {
+    pub fn snapshot(&self) -> Env {
+        let mut ret = Vec::with_capacity(self.accounts.len());
+        for (acc, entry) in &self.accounts {
+            let mut kv = Vec::with_capacity(entry.storage.len());
+            for (key, slot) in &entry.storage {
+                kv.push((*key, slot.current));
+            }
+            kv.sort_by_key(|(k, _)| *k);
+            ret.push((*acc, entry.account.clone(), kv));
+        }
+        ret.sort_by_key(|(acc, _, _)| *acc);
+        ret
     }
 }

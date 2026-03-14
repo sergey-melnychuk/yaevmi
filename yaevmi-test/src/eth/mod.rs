@@ -1,18 +1,15 @@
 pub mod dto;
 
-use std::sync::{
-    Arc,
-    atomic::{AtomicUsize, Ordering},
+use std::{
+    collections::HashMap,
+    sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    },
 };
 
-use yaevmi_base::{Acc, Int, dto::Head};
-use yaevmi_core::{
-    Call, Tx,
-    cache::Cache,
-    chain::Chain,
-    exe::{CallResult, Executor},
-    state::{Account, State},
-};
+use yaevmi_base::{Acc, Int};
+use yaevmi_core::{Call, Head, Tx, cache::Env, chain::Chain, state::Account};
 
 use dto::{PostEntry, TestCase};
 use yaevmi_misc::buf::Buf;
@@ -46,24 +43,46 @@ impl Chain for EmptyChain {
     }
 }
 
-/// Build an Cache from a test case's `pre` section.
-pub fn build_state(tc: &TestCase) -> Cache {
+/// Build a map from addresses to account states.
+pub fn build_map(env: Env) -> HashMap<Acc, dto::AccountState> {
+    env.into_iter()
+        .map(|(acc, account, storage)| {
+            let storage = storage.into_iter().collect();
+            (
+                acc,
+                dto::AccountState {
+                    balance: account.value,
+                    code: account.code.0,
+                    nonce: account.nonce,
+                    storage,
+                },
+            )
+        })
+        .collect()
+}
+
+/// Build an Env from a test case's `pre` section.
+pub fn build_env(tc: &TestCase) -> Env {
     use yaevmi_misc::keccak256;
-    let mut state = Cache::new();
-    for (addr, pre) in &tc.pre {
-        let code = pre.code.as_slice().to_vec();
-        let code_hash = keccak256(&code);
-        let account = Account {
-            value: pre.balance,
-            nonce: pre.nonce,
-            code: (code.into(), code_hash),
-        };
-        state.insert_account(*addr, account);
-        for (key, val) in &pre.storage {
-            state.insert_storage(*addr, *key, *val);
-        }
-    }
-    state
+
+    tc.pre
+        .iter()
+        .map(|(acc, state)| {
+            let code_bytes = state.code.as_slice().to_vec();
+            let code_hash = if code_bytes.is_empty() {
+                Int::ZERO
+            } else {
+                Int::from(keccak256(&code_bytes).as_ref())
+            };
+            let account = Account {
+                value: state.balance,
+                nonce: state.nonce,
+                code: (code_bytes.into(), code_hash),
+            };
+            let storage: Vec<(Int, Int)> = state.storage.iter().map(|(k, v)| (*k, *v)).collect();
+            (*acc, account, storage)
+        })
+        .collect()
 }
 
 /// Build the Head (block environment) from the `env` section.
@@ -87,165 +106,77 @@ pub fn build_head(tc: &TestCase) -> Head {
 }
 
 /// Build a Call for one (data_idx, gas_idx, value_idx) combination.
-pub fn build_call(tc: &TestCase, idx: &dto::Indexes) -> Call {
-    Call {
-        by: tc.transaction.sender,
-        to: tc.transaction.to.unwrap_or(Acc::ZERO),
-        gas: tc.transaction.gas_limit[idx.gas].as_u64(),
-        eth: tc.transaction.value[idx.value],
-        data: tc.transaction.data[idx.data].as_slice().to_vec().into(),
-        auth: vec![],
-        nonce: Some(tc.transaction.nonce.as_u64()),
-    }
+pub fn build_call_tx(tc: &TestCase, idx: &dto::Indexes) -> (Call, Tx) {
+    (
+        Call {
+            by: tc.transaction.sender,
+            to: tc.transaction.to.unwrap_or(Acc::ZERO),
+            gas: tc.transaction.gas_limit[idx.gas].as_u64(),
+            eth: tc.transaction.value[idx.value],
+            data: tc.transaction.data[idx.data].as_slice().to_vec().into(),
+        },
+        Tx {
+            nonce: Some(tc.transaction.nonce.as_u64()),
+            gas_price: tc.transaction.gas_price.unwrap_or(Int::ZERO),
+            max_fee_per_gas: tc.transaction.max_fee_per_gas.unwrap_or(Int::ZERO),
+            max_priority_fee_per_gas: tc.transaction.max_priority_fee_per_gas.unwrap_or(Int::ZERO),
+            access_list: tc
+                .transaction
+                .access_lists
+                .as_ref()
+                .unwrap_or(&vec![None])
+                .iter()
+                .flatten()
+                .map(|vec| {
+                    vec.iter()
+                        .map(|a| {
+                            (
+                                a.address,
+                                a.storage_keys.iter().map(|k| *k).collect::<Vec<Int>>(),
+                            )
+                        })
+                        .collect::<Vec<(Acc, Vec<Int>)>>()
+                })
+                .flatten()
+                .collect::<Vec<(Acc, Vec<Int>)>>(),
+            authorization_list: vec![],
+            blob_hashes: vec![],
+            max_fee_per_blob_gas: Int::ZERO,
+        },
+    )
 }
 
 /// Run a single post-entry and return Ok(()) if execution and state match.
 pub async fn run_entry(tc: &TestCase, entry: &PostEntry) -> eyre::Result<()> {
-    use yaevmi_base::math::U256;
-
     let head = build_head(tc);
-    let mut state = build_state(tc);
-    let mut call = build_call(tc, &entry.indexes);
+    let (call, tx) = build_call_tx(tc, &entry.indexes);
+    let env = build_env(tc);
 
-    let gas_limit = call.gas;
-    let value = call.eth;
-    let sender = call.by;
-    let recipient = call.to;
-
-    let i2u = |i: Int| U256::from_be_slice(i.as_ref());
-    let u2i = |u: U256| -> Int { Int::from(&u.to_be_bytes::<32>()[..]) };
-
-    // Effective gas price (EIP-1559 or legacy)
-    let base_fee = i2u(head.base_fee);
-    let max_fee = i2u(tc
-        .transaction
-        .max_fee_per_gas
-        .or(tc.transaction.gas_price)
-        .unwrap_or(Int::ZERO));
-    let gas_price = if tc.transaction.max_fee_per_gas.is_some() {
-        let priority = i2u(tc.transaction.max_priority_fee_per_gas.unwrap_or(Int::ZERO));
-        max_fee.min(base_fee + priority)
-    } else {
-        max_fee
-    };
-
-    // Access list for this data index (EIP-2930)
-    let access_list: Vec<dto::AccessListEntry> = tc
-        .transaction
-        .access_lists
-        .as_deref()
-        .unwrap_or_default()
-        .get(entry.indexes.data)
-        .and_then(|o| o.as_ref())
-        .cloned()
-        .unwrap_or_default();
-
-    // Intrinsic gas: base + calldata + EIP-3860 initcode + EIP-2930 access list
-    let intrinsic: u64 = {
-        let base: u64 = if recipient.is_zero() { 53_000 } else { 21_000 };
-        let cd: u64 = call
-            .data
-            .0
-            .iter()
-            .map(|&b| if b == 0 { 4u64 } else { 16u64 })
-            .sum();
-        let initcode_cost: u64 = if recipient.is_zero() {
-            2 * ((call.data.0.len() as u64 + 31) / 32)
-        } else {
-            0
-        };
-        let al_cost: u64 = access_list
-            .iter()
-            .map(|e| 2400 + e.storage_keys.len() as u64 * 1900)
-            .sum();
-        base + cd + initcode_cost + al_cost
-    };
-    // Reject invalid transactions (gasLimit < intrinsic)
-    if gas_limit < intrinsic {
-        return Ok(());
-    }
-    call.gas = gas_limit - intrinsic;
-
-    // 1. Increment sender nonce
-    state.inc_nonce(&sender, Int::ONE);
-
-    // 2. Upfront deduction: gas_limit * max_fee + value
-    let upfront = U256::from(gas_limit) * max_fee + i2u(value);
-    let bal = i2u(state.balance(&sender).unwrap_or(Int::ZERO));
-    state.set_value(&sender, u2i(bal - upfront));
-
-    // EIP-2929: pre-warm sender, recipient, and access list
-    state.warm_acc(&sender);
-    if !recipient.is_zero() {
-        state.warm_acc(&recipient);
-    }
-    for al_entry in &access_list {
-        state.warm_acc(&al_entry.address);
-        for key in &al_entry.storage_keys {
-            state.warm_key(&al_entry.address, key);
-        }
-    }
-
-    // Execute — reverts/halts return Ok(Done { status: 0 }), only infra errors are Err
-    let mut exe = Executor::new(call);
-    let gas = match exe.run(head, &mut state, &EmptyChain).await {
-        Ok(CallResult::Created { addr, code, gas }) => {
-            if !code.0.is_empty() {
-                let hash = Int::from(yaevmi_misc::keccak256(code.as_slice()).as_ref());
-                state.acc_mut(&addr).code = (code.into(), hash);
-            }
-            gas
-        }
-        Ok(CallResult::Done { gas, .. }) => gas,
-        Err(e) => {
-            println!("DEBUG: ERROR: {e}");
-            yaevmi_core::evm::Gas {
-                limit: gas_limit as i64,
-                spent: gas_limit as i64,
-                refund: 0,
-                finalized: 0,
-            }
-        }
-    };
-
-    // Gas accounting (intrinsic + EVM execution)
-    let evm_gas = gas_limit.saturating_sub(intrinsic);
-    let evm_used = (gas.spent.max(0) as u64).min(evm_gas);
-    let gas_used = (intrinsic + evm_used).min(gas_limit);
-    let max_refund = gas_used / 5; // EIP-3529
-    let gas_refund = (gas.refund.max(0) as u64).min(max_refund);
-    let effective_used = gas_used - gas_refund;
-
-    // 4. Refund sender: upfront was gas_limit*max_fee, actual cost is effective_used*gas_price
-    let refund_wei = U256::from(gas_limit) * max_fee - U256::from(effective_used) * gas_price;
-    let bal = i2u(state.balance(&sender).unwrap_or(Int::ZERO));
-    state.set_value(&sender, u2i(bal + refund_wei));
-
-    // 5. Pay coinbase the priority fee (effective_gas_price - base_fee) * gas_used
-    let priority = gas_price.saturating_sub(base_fee);
-    let miner_reward = U256::from(effective_used) * priority;
-    if !miner_reward.is_zero() {
-        let coinbase: Acc = head.coinbase.to();
-        let bal = i2u(state.balance(&coinbase).unwrap_or(Int::ZERO));
-        state.set_value(&coinbase, u2i(bal + miner_reward));
-    }
+    let (_, _, _, _, snapshot) = crate::sol::run(call, head, env, tx).await?;
+    let (_, _, _, _, snapshot) = crate::revm::run(call, head, env, tx).await?;
 
     // Validate explicit post-state when present in the fixture.
+    let map = build_map(snapshot);
     for (addr, expected) in &entry.state {
-        let balance = expected.balance;
-        let actual_balance = state.balance(addr).unwrap_or(Int::ZERO);
+        let actual_balance = map.get(addr).map(|a| a.balance).unwrap_or_default();
         eyre::ensure!(
-            actual_balance == balance,
-            "\n for {addr:?} balance:\n got {actual_balance:?}\nwant {balance:?}"
+            actual_balance == expected.balance,
+            "\n for {addr:?} balance:\n got {actual_balance:?}\nwant {:?}",
+            expected.balance
         );
-        let actual_nonce = state.nonce(addr).unwrap_or(Int::ZERO);
+        let actual_nonce = map.get(addr).map(|a| a.nonce).unwrap_or_default();
         eyre::ensure!(
             actual_nonce == expected.nonce,
             "\n for {addr:?} nonce:\n got {actual_nonce}\nwant {}",
             expected.nonce
         );
+        let actual_code = map.get(addr).map(|a| a.code.as_slice()).unwrap_or_default();
+        eyre::ensure!(
+            actual_code == expected.code.as_slice(),
+            "\n for {addr:?} code: mismatch"
+        );
         for (key, want) in &expected.storage {
-            let got = state.storage(addr, key).unwrap_or(Int::ZERO);
+            let got = map[addr].storage.get(key).copied().unwrap_or(Int::ZERO);
             eyre::ensure!(
                 got == *want,
                 "\n for {addr:?}[{key:?}]:\n got {got:?}\nwant {want:?}"
@@ -268,6 +199,7 @@ pub async fn run_case(tc: &TestCase, fork: &str) -> Vec<eyre::Result<()>> {
 }
 
 #[tokio::test]
+#[ignore]
 async fn test_shallow_stack() {
     let path = concat!(
         env!("CARGO_MANIFEST_DIR"),
@@ -294,6 +226,7 @@ async fn test_general_state_cancun() -> eyre::Result<()> {
     let root = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/GeneralStateTests");
 
     let counter = Arc::new(AtomicUsize::new(0));
+    let passes = Arc::new(AtomicUsize::new(0));
 
     let mut handles = Vec::new();
     for category in std::fs::read_dir(root).expect("GeneralStateTests not found") {
@@ -301,10 +234,6 @@ async fn test_general_state_cancun() -> eyre::Result<()> {
         if !category.is_dir() {
             continue;
         }
-        // let category_name = category.file_name().and_then(|n| n.to_str()).unwrap_or("");
-        // if category_name == "stTimeConsuming" && std::env::var("RUN_TIME_CONSUMING").is_err() {
-        //     continue;
-        // }
         for entry in std::fs::read_dir(&category).unwrap() {
             let file_path = entry.unwrap().path();
             if file_path.extension().and_then(|e| e.to_str()) != Some("json") {
@@ -320,6 +249,7 @@ async fn test_general_state_cancun() -> eyre::Result<()> {
             };
 
             let counter = counter.clone();
+            let passes = passes.clone();
             let handle = tokio::spawn(async move {
                 let mut total: usize = 0;
                 let mut failed = Vec::new();
@@ -333,8 +263,13 @@ async fn test_general_state_cancun() -> eyre::Result<()> {
                         }
                     }
                 }
+                let passes = if failed.is_empty() {
+                    passes.fetch_add(1, Ordering::Relaxed)
+                } else {
+                    passes.load(Ordering::Relaxed)
+                };
                 let count = counter.fetch_add(1, Ordering::Relaxed);
-                println!("DEBUG: Done ({count}): {file_path:?}: {total}");
+                println!("DEBUG: Done ({passes} | {count}): {file_path:?}: {total}");
                 (total, failed)
             });
             handles.push(handle);

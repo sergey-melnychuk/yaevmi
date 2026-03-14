@@ -1823,6 +1823,7 @@ dependencies = [
  "elliptic-curve",
  "once_cell",
  "sha2",
+ "signature",
 ]
 
 [[package]]
@@ -4108,6 +4109,7 @@ dependencies = [
  "ethnum",
  "eyre",
  "hex",
+ "k256",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
@@ -4141,6 +4143,7 @@ dependencies = [
  "eyre",
  "futures",
  "hex",
+ "k256",
  "pretty_assertions",
  "revm",
  "serde",

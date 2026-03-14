@@ -1,6 +1,7 @@
 use revm::bytecode::Bytecode;
 use revm::bytecode::opcode::OpCode;
 use revm::context::TxEnv;
+use revm::context::transaction::{AccessList, AccessListItem};
 use revm::context_interface::result::{ExecResultAndState, ExecutionResult, Output};
 use revm::database::InMemoryDB;
 use revm::inspector::InspectorEvmTr;
@@ -12,8 +13,10 @@ use revm::{Context, InspectEvm, Inspector, MainBuilder, MainContext};
 use yaevmi_base::{Acc, Int};
 use yaevmi_core::state::Account;
 use yaevmi_core::trace::Step;
-use yaevmi_core::{Call, Head};
+use yaevmi_core::{Call, Head, Tx};
 use yaevmi_misc::buf::Buf;
+
+use yaevmi_core::cache::Env;
 
 #[derive(Debug, Default)]
 pub struct Tracer {
@@ -65,8 +68,9 @@ impl<CTX> Inspector<CTX, EthInterpreter> for Tracer {
 pub async fn run(
     call: Call,
     head: Head,
-    env: Vec<(Acc, Account, Vec<(Int, Int)>)>,
-) -> eyre::Result<(Int, Buf, i64, Vec<Step>)> {
+    env: Env,
+    tx: Tx,
+) -> eyre::Result<(Int, Buf, i64, Vec<Step>, Env)> {
     let to_addr = |a: &Acc| Address::from(<[u8; 20]>::try_from(a.as_ref()).unwrap());
     let to_u256 = |i: &Int| U256::from_be_bytes(<[u8; 32]>::try_from(i.as_ref()).unwrap());
     let to_b256 = |i: &Int| B256::from(<[u8; 32]>::try_from(i.as_ref()).unwrap());
@@ -104,6 +108,10 @@ pub async fn run(
     ctx.block.prevrandao = Some(to_b256(&head.prevrandao));
     ctx.cfg.chain_id = head.chain_id as u64;
 
+    ctx.cfg.disable_block_gas_limit = true;
+    ctx.cfg.disable_base_fee = true;
+    ctx.cfg.tx_gas_limit_cap = Some(u64::MAX);
+
     let kind = if call.to.is_zero() {
         TxKind::Create
     } else {
@@ -113,25 +121,70 @@ pub async fn run(
         .caller(to_addr(&call.by))
         .kind(kind)
         .gas_limit(call.gas)
-        .gas_price(head.gas_price.as_u128())
+        .gas_price(tx.gas_price.as_u128())
         .value(to_u256(&call.eth))
         .data(Bytes::from(call.data.0.clone()))
-        .nonce(call.nonce.unwrap_or(0))
+        .nonce(tx.nonce.unwrap_or(0))
+        .access_list(AccessList::from(
+            tx.access_list
+                .iter()
+                .map(|(addr, slots)| AccessListItem {
+                    address: to_addr(addr),
+                    storage_keys: slots
+                        .iter()
+                        .map(|slot| to_b256(slot))
+                        .collect::<Vec<B256>>(),
+                })
+                .collect::<Vec<AccessListItem>>(),
+        ))
+        .max_fee_per_gas(tx.max_fee_per_gas.as_u128())
+        .gas_priority_fee(Some(tx.max_priority_fee_per_gas.as_u128()))
+        .authorization_list(vec![])
+        .blob_hashes(vec![])
+        .max_fee_per_blob_gas(Int::ZERO.as_u128())
         .build()
         .map_err(|e| eyre::eyre!("{e:?}"))?;
 
     let mut evm = ctx.build_mainnet_with_inspector(Tracer::default());
-    let ExecResultAndState { result, state: _ } = evm.inspect_tx(tx)?;
+    let ExecResultAndState { result, state } = evm.inspect_tx(tx)?;
     let tracer = std::mem::take(&mut evm.inspector().traces);
 
-    // for (addr, account) in &state {
-    //     println!("{addr}");
-    //     println!("  value={}", account.info.balance);
-    //     println!("  nonce={}", account.info.nonce);
-    //     for (slot, val) in &account.storage {
-    //         println!("  [{slot}] = {}", val.present_value);
-    //     }
-    // }
+    let from_u256 = |u: U256| -> Int { Int::from(&u.to_be_bytes::<32>()[..]) };
+    let from_b256 = |b: B256| -> Int { Int::from(b.as_slice()) };
+
+    let mut snapshot: Env = Vec::with_capacity(state.len());
+    for (addr, account) in &state {
+        if account.is_selfdestructed() {
+            continue;
+        }
+        let code_bytes = account
+            .info
+            .code
+            .as_ref()
+            .map(|c| c.original_bytes().to_vec())
+            .unwrap_or_default();
+        let code_hash = if code_bytes.is_empty() {
+            Int::ZERO
+        } else {
+            from_b256(account.info.code_hash)
+        };
+        let mut kv: Vec<_> = account
+            .storage
+            .iter()
+            .map(|(slot, val)| (from_u256(*slot), from_u256(val.present_value)))
+            .collect();
+        kv.sort_by_key(|(k, _)| *k);
+        snapshot.push((
+            Acc::from(addr.as_slice()),
+            Account {
+                value: from_u256(account.info.balance),
+                nonce: Int::from(account.info.nonce),
+                code: (Buf(code_bytes), code_hash),
+            },
+            kv,
+        ));
+    }
+    snapshot.sort_by_key(|(acc, _, _)| *acc);
 
     match result {
         ExecutionResult::Success { gas, output, .. } => match output {
@@ -140,6 +193,7 @@ pub async fn run(
                 Buf(code.to_vec()),
                 gas.used() as i64,
                 tracer.into(),
+                snapshot,
             )),
             Output::Create(_, None) => Err(eyre::eyre!("contract creation: no address")),
             Output::Call(bytes) => Ok((
@@ -147,6 +201,7 @@ pub async fn run(
                 Buf(bytes.to_vec()),
                 gas.used() as i64,
                 tracer.into(),
+                snapshot,
             )),
         },
         ExecutionResult::Revert { gas, output, .. } => Ok((
@@ -154,12 +209,14 @@ pub async fn run(
             Buf(output.to_vec()),
             gas.used() as i64,
             tracer.into(),
+            snapshot,
         )),
         ExecutionResult::Halt { gas, .. } => Ok((
             Int::from(0u64),
             Buf::default(),
             gas.used() as i64,
             tracer.into(),
+            snapshot,
         )),
     }
 }

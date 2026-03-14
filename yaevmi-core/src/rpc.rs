@@ -1,13 +1,14 @@
 #![allow(dead_code)] // TODO: remove this
 
 use serde_json::{Value, json};
-use yaevmi_base::{
-    Acc, Int,
-    dto::{Head, Tx},
-};
+use yaevmi_base::{Acc, Int};
 use yaevmi_misc::{buf::Buf, http::Http};
 
-use crate::{chain::Chain, state::Account};
+use crate::{
+    call::{Head, Tx},
+    chain::Chain,
+    state::Account,
+};
 
 pub struct Rpc {
     url: String,

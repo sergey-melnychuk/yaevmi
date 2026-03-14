@@ -42,6 +42,13 @@ pub fn swap(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResul
     Ok(())
 }
 
+pub fn len(op: u8) -> usize {
+    match op {
+        0x60..0x80 => op as usize - 0x60 + 1, // PUSH{1..32}
+        _ => 0,
+    }
+}
+
 pub fn idx(op: u8) -> usize {
     match op {
         0x80..0x90 => op as usize - 0x80 + 1, // DUP{1..16}
@@ -52,10 +59,9 @@ pub fn idx(op: u8) -> usize {
 
 #[cfg(test)]
 mod tests {
-    use yaevmi_base::dto::Head;
-
     use super::super::tests::{call, ctx, state};
     use super::*;
+    use crate::call::Head;
     use crate::{
         Int,
         evm::{Evm, HaltReason},

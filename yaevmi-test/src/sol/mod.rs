@@ -1,12 +1,10 @@
-// TODO: Add tests against local solidity contracts
-
 use std::{collections::HashMap, fs::File, io::BufReader};
 
 use serde::Deserialize;
 use yaevmi_base::{Acc, Int, acc, int, math::lift};
 use yaevmi_core::{
-    Call, Head,
-    cache::Cache,
+    Call, Head, Tx,
+    cache::{Cache, Env},
     exe::{CallResult, Executor},
     state::Account,
     trace::{Event, Step},
@@ -14,6 +12,8 @@ use yaevmi_core::{
 use yaevmi_misc::buf::Buf;
 
 use crate::eth::EmptyChain;
+
+pub mod auths;
 
 #[derive(Deserialize)]
 pub struct Combined {
@@ -40,9 +40,11 @@ pub fn load() -> Result<Combined, eyre::Report> {
 pub async fn run(
     call: Call,
     head: Head,
-    env: Vec<(Acc, Account, Vec<(Int, Int)>)>,
-) -> eyre::Result<(Int, Buf, i64, Vec<Step>)> {
+    env: Env,
+    tx: Tx,
+) -> eyre::Result<(Int, Buf, i64, Vec<Step>, Env)> {
     let mut state = Cache::new();
+    state.insert_account(head.coinbase, Account::default());
     for (acc, info, storage) in env {
         state.insert_account(acc, info);
         for (key, val) in storage {
@@ -50,9 +52,13 @@ pub async fn run(
         }
     }
 
+    // TODO: pre-call gas accounting
+
     let mut exe = Executor::new(call);
     let mut chain = EmptyChain;
-    let res = exe.run(head, &mut state, &mut chain).await?;
+    let res = exe.run(tx, head, &mut state, &mut chain).await?;
+
+    // TODO: post-call gas accounting
 
     let steps = state
         .events
@@ -63,9 +69,11 @@ pub async fn run(
         })
         .collect::<Vec<_>>();
 
+    let snapshot = state.snapshot();
+
     Ok(match res {
-        CallResult::Created { addr, code, gas } => (addr.to(), code, gas.spent, steps),
-        CallResult::Done { status, ret, gas } => (status, ret, gas.spent, steps),
+        CallResult::Created { addr, code, gas } => (addr.to(), code, gas.spent, steps, snapshot),
+        CallResult::Done { status, ret, gas } => (status, ret, gas.spent, steps, snapshot),
     })
 }
 
@@ -96,12 +104,11 @@ async fn test_deploy_counter() -> eyre::Result<()> {
             nonce,
             code: (Buf::default(), Int::ZERO),
         },
-        vec![(int("0xFF"), int("0xFF"))],
+        vec![],
     )];
     let head = Head {
         number: 1,
         hash: int("0x1"),
-        gas_price: 1.into(),
         gas_limit: 1_000_000.into(),
         coinbase: acc("0xC014BA5E"),
         timestamp: 42.into(),
@@ -117,27 +124,20 @@ async fn test_deploy_counter() -> eyre::Result<()> {
         gas: 1_000_000,
         eth: Int::ZERO,
         data: contract.bin.clone(),
-        auth: vec![],
+    };
+    let tx = Tx {
         nonce: None,
+        gas_price: 1.into(),
+        max_fee_per_gas: 1.into(),
+        max_priority_fee_per_gas: 1.into(),
+        access_list: vec![],
+        authorization_list: vec![],
+        blob_hashes: vec![],
+        max_fee_per_blob_gas: 1.into(),
     };
 
-    // for line in text(call.data.as_slice()) {
-    //     println!("{line}");
-    // }
-
-    let exp = crate::revm::run(call.clone(), head.clone(), env.clone()).await?;
-    let res = run(call, head, env).await?;
-
+    let exp = crate::revm::run(call.clone(), head.clone(), env.clone(), tx.clone()).await?;
+    let res = run(call, head, env, tx).await?;
     pretty_assertions::assert_eq!(res, exp);
-
-    /*
-    let (acc, ret, gas) = run(call, head, env).await?;
-    assert!(gas >= 0, "gas charged"); // TODO: update after gas finalisation impl
-
-    let created = create_address(&sender, nonce.as_u64()).to::<32>();
-    assert_eq!(acc, created, "acc created");
-
-    assert_eq!(ret.as_slice(), contract.bin_runtime.as_slice());
-     */
     Ok(())
 }

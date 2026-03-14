@@ -156,6 +156,7 @@ pub fn jumpi(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResu
     evm.gas_charge(10)?;
     let [dst, val] = evm.peek()?;
     if val.is_zero() {
+        evm.pc += 1;
         return Ok(());
     }
     let dst = dst.as_usize();

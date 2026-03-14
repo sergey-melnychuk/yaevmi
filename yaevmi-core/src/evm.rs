@@ -1,5 +1,5 @@
+use crate::call::Head;
 use serde::{Deserialize, Serialize};
-use yaevmi_base::dto::Head;
 
 use crate::{Acc, Call, Int, Result, ops::OPS, state::State};
 
@@ -408,10 +408,6 @@ impl Evm {
                         StepResult::Revert(ret)
                     }
                     EvmYield::Call(call, mode) => {
-                        self.apply(state);
-                        if !is_jump(op) {
-                            self.pc += 1;
-                        }
                         let gas = self.gas.remaining().max(0) as u64;
                         step1.gas = gas;
                         step1.stack = self.stack.len();

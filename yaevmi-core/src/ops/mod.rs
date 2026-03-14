@@ -343,8 +343,6 @@ pub mod tests {
             gas: 0,
             eth: Int::ZERO,
             data: vec![].into(),
-            auth: vec![],
-            nonce: None,
         }
     }
 
@@ -419,11 +417,11 @@ pub mod tests {
         fn destroy(&mut self, _: &Acc) {
             ()
         }
-        fn created(&self) -> &[Acc] {
-            &[]
+        fn created(&self) -> Vec<Acc> {
+            vec![]
         }
-        fn destroyed(&self) -> &[Acc] {
-            &[]
+        fn destroyed(&self) -> Vec<Acc> {
+            vec![]
         }
         fn head(&self, _: u64) -> Option<Head> {
             None
@@ -441,6 +439,9 @@ pub mod tests {
             0
         }
         fn set_auth(&mut self, _: &Acc, _: &Acc) {
+            ()
+        }
+        fn apply(&mut self) {
             ()
         }
     }

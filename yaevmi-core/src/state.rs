@@ -2,7 +2,7 @@ use yaevmi_misc::buf::Buf;
 
 use crate::{Acc, Head, Int, trace::Event};
 
-#[derive(Clone, Default)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Account {
     pub value: Int,
     pub nonce: Int,
@@ -42,8 +42,9 @@ pub trait State {
 
     fn head(&self, number: u64) -> Option<Head>;
     fn auth(&self, acc: &Acc) -> Option<Acc>;
-    fn created(&self) -> &[Acc];
-    fn destroyed(&self) -> &[Acc];
+    fn created(&self) -> Vec<Acc>;
+    fn destroyed(&self) -> Vec<Acc>;
+    fn apply(&mut self);
 
     fn emit(&mut self, event: Event) -> usize;
 

@@ -1,9 +1,10 @@
+use yaevmi_base::math::lift;
 use yaevmi_base::{Acc, Int};
 use yaevmi_misc::keccak256;
 
 use crate::{
     Call,
-    aux::{create_address, create2_address},
+    aux::{create_address, create2_address, is_precompile},
     evm::{self, CallMode, Context, Evm, EvmResult, EvmYield, Fetch},
     state::State,
 };
@@ -38,8 +39,6 @@ pub fn create(evm: &mut Evm, ctx: &Context, _: &Call, state: &mut dyn State) -> 
         gas,
         eth: value,
         data: data.into(),
-        auth: vec![],
-        nonce: None,
     };
 
     Err(EvmYield::Call(call, CallMode::Create(address)))
@@ -110,8 +109,6 @@ pub fn call(evm: &mut Evm, ctx: &Context, _: &Call, state: &mut dyn State) -> Ev
         gas,
         eth: value,
         data: data.to_vec().into(),
-        auth: vec![],
-        nonce: None,
     };
 
     Err(EvmYield::Call(call, CallMode::Call(ret_offset, ret_size)))
@@ -168,8 +165,6 @@ pub fn callcode(evm: &mut Evm, ctx: &Context, _: &Call, state: &mut dyn State) -
         gas,
         eth: value,
         data: data.to_vec().into(),
-        auth: vec![],
-        nonce: None,
     };
 
     Err(EvmYield::Call(
@@ -230,8 +225,6 @@ pub fn delegatecall(
         gas,
         eth: Int::ZERO,
         data: data.to_vec().into(),
-        auth: vec![],
-        nonce: None,
     };
 
     Err(EvmYield::Call(
@@ -263,8 +256,6 @@ pub fn create2(evm: &mut Evm, ctx: &Context, _: &Call, _: &mut dyn State) -> Evm
         gas,
         eth: value,
         data: data.into(),
-        auth: vec![],
-        nonce: None,
     };
 
     Err(EvmYield::Call(call, CallMode::Create2(address)))
@@ -282,11 +273,9 @@ pub fn staticcall(evm: &mut Evm, ctx: &Context, _: &Call, state: &mut dyn State)
     let (args_offset, args_size) = (args_offset.as_usize(), args_size.as_usize());
     let (ret_offset, ret_size) = (ret_offset.as_usize(), ret_size.as_usize());
     let address: Acc = address.to();
+    let is_precompile = is_precompile(&address);
 
-    if state.acc(&address).is_none() {
-        return Err(EvmYield::Fetch(Fetch::Account(address)));
-    };
-
+    // EIP-2929: warm/cold address access (applies to precompiles too)
     let access_cost: i64 = if state.is_cold_acc(&address) {
         evm.warm_acc(&address);
         2600
@@ -300,7 +289,20 @@ pub fn staticcall(evm: &mut Evm, ctx: &Context, _: &Call, state: &mut dyn State)
 
     let available = evm.gas_remaining().max(0) as u64;
     let max_child = available - available / 64;
+
+    // TOOD:NOW!
     let gas = gas_arg.as_u64().min(max_child);
+    // let gas = if is_precompile {
+    //     // Precompiles run inline; cap charge to avoid OOG (ecrecover=3k, others ≤100k)
+    //     gas_arg.as_u64().min(max_child).min(100_000)
+    // } else {
+    //     gas_arg.as_u64().min(max_child)
+    // };
+
+    if !is_precompile && state.acc(&address).is_none() {
+        return Err(EvmYield::Fetch(Fetch::Account(address)));
+    };
+
     evm.gas_charge(gas as i64)?;
 
     let data = evm.mem_get(args_offset, args_size)?;
@@ -311,8 +313,6 @@ pub fn staticcall(evm: &mut Evm, ctx: &Context, _: &Call, state: &mut dyn State)
         gas,
         eth: Int::ZERO,
         data: data.to_vec().into(),
-        auth: vec![],
-        nonce: None,
     };
 
     Err(EvmYield::Call(call, CallMode::Static(ret_offset, ret_size)))
@@ -324,9 +324,50 @@ pub fn revert(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmRes
     Err(EvmYield::Revert(mem.to_vec()))
 }
 
-// TODO: 0xFF SELFDESTRUCT
-pub fn selfdestruct(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<()> {
+pub fn selfdestruct(
+    evm: &mut Evm,
+    ctx: &Context,
+    _: &Call,
+    state: &mut dyn State,
+) -> EvmResult<()> {
     evm.gas_charge(5_000)?;
-    // TODO: transfer value, mark deleted
-    Ok(())
+
+    // EIP-214: SELFDESTRUCT in static context reverts the transaction
+    if ctx.is_static {
+        return Err(EvmYield::Revert(vec![]));
+    }
+
+    let [beneficiary] = evm.peek()?;
+    let beneficiary: Acc = beneficiary.to();
+
+    // EIP-2929: warm/cold address access for beneficiary
+    let access_cost: i64 = if state.is_cold_acc(&beneficiary) {
+        evm.warm_acc(&beneficiary);
+        2600
+    } else {
+        100
+    };
+    evm.gas_charge(access_cost)?;
+
+    let balance = state.balance(&ctx.this).unwrap_or(Int::ZERO);
+    if !balance.is_zero() && beneficiary != ctx.this {
+        // EIP-161: creating empty account costs 25000 when transferring value
+        let is_empty = state
+            .acc(&beneficiary)
+            .map(|a| a.value.is_zero() && a.nonce.is_zero() && a.code.0.0.is_empty())
+            .unwrap_or(true);
+        if is_empty {
+            evm.gas_charge(25_000)?;
+        }
+        let add = lift(|[a, b]| a + b);
+        let to_bal = state.balance(&beneficiary).unwrap_or(Int::ZERO);
+        state.set_value(&beneficiary, add([to_bal, balance]));
+        state.set_value(&ctx.this, Int::ZERO);
+    }
+
+    // EIP-6780 (Cancun): only destroy if contract was created in same transaction
+    if state.created().contains(&ctx.this) {
+        state.destroy(&ctx.this);
+    }
+    Err(EvmYield::Return(vec![]))
 }

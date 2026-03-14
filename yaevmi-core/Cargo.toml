@@ -13,6 +13,7 @@ ethnum.workspace = true
 hex.workspace = true
 yaevmi-base.workspace = true
 yaevmi-misc.workspace = true
+k256.workspace = true
 
 ## Allow `EvmYield` as result error despite the size
 ## TODO: consider `Call(Call, CallMode),` => `Call(Box<Call>, CallMode),`
