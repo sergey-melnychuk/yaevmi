@@ -1,0 +1,4 @@
+[target.wasm32-unknown-unknown]
+## Transitive `getrandom` need this workaround
+## https://docs.rs/getrandom/latest/getrandom/
+rustflags = ['--cfg', 'getrandom_backend="wasm_js"',]

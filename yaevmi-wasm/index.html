@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html>
+<head></head>
+<body>
+    <p>see console</p>
+    <script type="module">
+        import init, { hello, call } from './pkg/yaevmi_wasm.js';
+        await init();
+
+        console.log(hello('world'));
+
+        let ret = call({
+            by: '0x1',
+            to: '0x2',
+            eth: '0x3',
+            gas: 4,
+            data: '0x5'
+        });
+        console.log(ret);
+
+        try {
+            call('computer says no');
+        } catch (e) {
+            console.error('failed to parse Call', e);
+        }
+    </script>
+</body>
+</html>
