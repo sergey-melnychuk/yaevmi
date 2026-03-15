@@ -1,21 +1,10 @@
 use k256::ecdsa::{RecoveryId, Signature, VerifyingKey};
-// use k256::elliptic_curve::sec1::ToEncodedPoint;
-
-/// Run a precompile. Returns `(success, output, gas_used)`.
-/// `success=false` means out-of-gas; output is empty and gas_used equals gas_limit.
-pub fn run(id: u64, input: &[u8], gas_limit: i64) -> (bool, Vec<u8>, i64) {
-    match id {
-        1 => ecrecover(input, gas_limit),
-        // 2-9: unimplemented — succeed with empty output and zero gas cost
-        _ => (true, vec![], 0),
-    }
-}
 
 /// ecrecover (precompile 0x01)
 /// Input:  hash[32] ++ v[32] ++ r[32] ++ s[32]  (padded to 128 bytes)
 /// Output: zero-padded recovered address (32 bytes), or empty on invalid sig
 /// Gas:    3000
-fn ecrecover(input: &[u8], gas_limit: i64) -> (bool, Vec<u8>, i64) {
+pub fn ecrecover(input: &[u8], gas_limit: i64) -> (bool, Vec<u8>, i64) {
     const GAS: i64 = 3_000;
     if GAS > gas_limit {
         return (false, vec![], gas_limit);

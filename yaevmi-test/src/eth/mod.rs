@@ -176,13 +176,13 @@ pub async fn run_entry(tc: &TestCase, entry: &PostEntry) -> eyre::Result<()> {
         let actual_balance = map.get(addr).map(|a| a.balance).unwrap_or_default();
         eyre::ensure!(
             actual_balance == expected.balance,
-            "\n for {addr:?} balance:\n got {actual_balance:?}\nwant {:?}",
+            "\n for {addr:?} balance:\nhave {actual_balance:?}\nwant {:?}",
             expected.balance
         );
         let actual_nonce = map.get(addr).map(|a| a.nonce).unwrap_or_default();
         eyre::ensure!(
             actual_nonce == expected.nonce,
-            "\n for {addr:?} nonce:\n got {actual_nonce}\nwant {}",
+            "\n for {addr:?} nonce:\nhave {actual_nonce}\nwant {}",
             expected.nonce
         );
         let actual_code = map.get(addr).map(|a| a.code.as_slice()).unwrap_or_default();
@@ -191,10 +191,10 @@ pub async fn run_entry(tc: &TestCase, entry: &PostEntry) -> eyre::Result<()> {
             "\n for {addr:?} code: mismatch"
         );
         for (key, want) in &expected.storage {
-            let got = map[addr].storage.get(key).copied().unwrap_or(Int::ZERO);
+            let have = map[addr].storage.get(key).copied().unwrap_or(Int::ZERO);
             eyre::ensure!(
-                got == *want,
-                "\n for {addr:?}[{key:?}]:\n got {got:?}\nwant {want:?}"
+                have == *want,
+                "\n for {addr:?}[{key:?}]:\nhave {have:?}\nwant {want:?}"
             );
         }
     }
