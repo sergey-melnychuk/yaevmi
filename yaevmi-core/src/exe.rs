@@ -189,16 +189,15 @@ impl Executor {
         };
 
         let (intrinsic, effective_gas_price) = intrinsic(&self.call, &tx, &head, state);
-
         if (self.call.gas as i64) < intrinsic {
             return Err(Error::GasTooLow { have: self.call.gas, want: intrinsic as u64 });
         }
-
-        transfer(&self.call, &mode, state);
-
         state.inc_nonce(&self.call.by, Int::ONE);
 
+        // prepare() takes a checkpoint to be able to revert,
+        // so transfer() must come AFTER that to be included
         let mut frame = prepare(head.clone(), self.call.clone(), mode, None, state, chain).await?;
+        transfer(&self.call, &mode, state);
         let _ = frame.evm.gas_charge(intrinsic);
         self.callstack.push(frame);
 

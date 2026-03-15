@@ -42,15 +42,9 @@ pub fn swap(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResul
     Ok(())
 }
 
-pub fn len(op: u8) -> usize {
+fn idx(op: u8) -> usize {
     match op {
         0x60..0x80 => op as usize - 0x60 + 1, // PUSH{1..32}
-        _ => 0,
-    }
-}
-
-pub fn idx(op: u8) -> usize {
-    match op {
         0x80..0x90 => op as usize - 0x80 + 1, // DUP{1..16}
         0x90..0xA0 => op as usize - 0x90 + 1, // SWAP{1..16}
         _ => 0,
@@ -68,7 +62,7 @@ mod tests {
     };
 
     fn int(val: u64) -> Int {
-        Int::from(val.to_be_bytes().as_slice())
+        Int::from(val)
     }
 
     fn is_halt(result: EvmResult<()>, expected: HaltReason) -> bool {
@@ -127,7 +121,6 @@ mod tests {
 
     #[test]
     fn test_push_truncated() {
-        // PUSH2 with only 1 byte of immediate — should halt BadOpcode
         let head = Head::default();
         let mut evm = Evm::new(head, vec![0x61, 0xFF], 1000);
         push(&mut evm, &ctx(), &call(), &mut state()).unwrap();
