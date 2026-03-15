@@ -38,21 +38,21 @@ pub enum CallMode {
 }
 
 impl CallMode {
-    pub fn range(&self) -> (usize, usize) {
+    pub fn target(&self) -> Option<(usize, usize)> {
         match self {
-            Self::Call(offset, size) => (*offset, *size),
-            Self::Static(offset, size) => (*offset, *size),
-            Self::Delegate(offset, size) => (*offset, *size),
-            Self::CallCode(offset, size) => (*offset, *size),
-            _ => (0, 0),
+            Self::Call(offset, size) => Some((*offset, *size)),
+            Self::Static(offset, size) => Some((*offset, *size)),
+            Self::Delegate(offset, size) => Some((*offset, *size)),
+            Self::CallCode(offset, size) => Some((*offset, *size)),
+            _ => None,
         }
     }
 
-    pub fn acc(&self) -> Acc {
+    pub fn created(&self) -> Option<Acc> {
         match self {
-            Self::Create(acc) => *acc,
-            Self::Create2(acc) => *acc,
-            _ => Acc::ZERO,
+            Self::Create(acc) => Some(*acc),
+            Self::Create2(acc) => Some(*acc),
+            _ => None,
         }
     }
 }

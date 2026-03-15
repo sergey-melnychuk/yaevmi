@@ -42,7 +42,7 @@ fn addr_word(a: &Acc) -> [u8; 32] {
 /// inner  = keccak256(abi.encode(auth, target, data, nonce))
 /// digest = keccak256("\x19Ethereum Signed Message:\n32" ++ inner)
 fn make_digest(auth: &Acc, target: &Acc, data: &[u8], nonce: u64) -> Int {
-    let data_pad = (data.len() + 31) / 32 * 32;
+    let data_pad = data.len().div_ceil(32) * 32;
     let mut enc = Vec::with_capacity(4 * 32 + 32 + data_pad);
     enc.extend_from_slice(&addr_word(auth)); // address(this)
     enc.extend_from_slice(&addr_word(target)); // target
@@ -63,8 +63,8 @@ fn make_digest(auth: &Acc, target: &Acc, data: &[u8], nonce: u64) -> Int {
 /// Heads: signer(32) + target(32) + data_offset(32) + nonce(32) + sig_offset(32) = 160 bytes
 fn encode_execute(signer: &Acc, target: &Acc, data: &[u8], nonce: u64, sig: &[u8; 65]) -> Vec<u8> {
     let sel = yaevmi_misc::keccak256(b"execute(address,address,bytes,uint256,bytes)");
-    let data_pad = (data.len() + 31) / 32 * 32;
-    let sig_pad = (65 + 31) / 32 * 32; // = 96
+    let data_pad = data.len().div_ceil(32) * 32;
+    let sig_pad = 65usize.div_ceil(32) * 32; // = 96
     let data_off = 5u64 * 32; // 5 head slots × 32 = 160
     let sig_off = data_off + 32 + data_pad as u64; // past data-length + data-content
 

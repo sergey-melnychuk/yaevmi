@@ -12,6 +12,10 @@ pub struct Call {
 }
 
 impl Call {
+    pub fn is_create(&self) -> bool {
+        self.to.is_zero()
+    }
+
     pub fn builder() -> Builder {
         Builder::default()
     }
@@ -52,7 +56,12 @@ impl Builder {
         }
     }
 
-    pub fn create(self, code: Vec<u8>) -> Self {
+    pub fn create(self, mut code: Vec<u8>, args: &[&[u8]]) -> Self {
+        let len = args.iter().map(|arg| arg.len()).sum::<usize>();
+        code.reserve(len);
+        for arg in args {
+            code.extend_from_slice(arg);
+        }
         Self {
             data: code.into(),
             ..self

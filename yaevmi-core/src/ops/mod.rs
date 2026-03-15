@@ -411,12 +411,8 @@ pub mod tests {
         fn warm_key(&mut self, _: &Acc, _: &Int) -> bool {
             false
         }
-        fn create(&mut self, _: Acc, _: Account) {
-            ()
-        }
-        fn destroy(&mut self, _: &Acc) {
-            ()
-        }
+        fn create(&mut self, _: Acc, _: Account) {}
+        fn destroy(&mut self, _: &Acc) {}
         fn created(&self) -> Vec<Acc> {
             vec![]
         }
@@ -426,23 +422,15 @@ pub mod tests {
         fn head(&self, _: u64) -> Option<Head> {
             None
         }
-        fn hash(&mut self, _: u64, _: Int) {
-            ()
-        }
+        fn hash(&mut self, _: u64, _: Int) {}
         fn auth(&self, _: &Acc) -> Option<Acc> {
             None
         }
-        fn log(&mut self, _: Buf, _: Vec<Int>) {
-            ()
-        }
+        fn log(&mut self, _: Buf, _: Vec<Int>) {}
         fn emit(&mut self, _: Event) -> usize {
             0
         }
-        fn set_auth(&mut self, _: &Acc, _: &Acc) {
-            ()
-        }
-        fn apply(&mut self) {
-            ()
-        }
+        fn set_auth(&mut self, _: &Acc, _: &Acc) {}
+        fn apply(&mut self) {}
     }
 }

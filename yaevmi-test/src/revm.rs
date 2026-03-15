@@ -122,7 +122,7 @@ pub async fn run(
         tx.max_priority_fee_per_gas.as_u128()
     };
 
-    let kind = if call.to.is_zero() {
+    let kind = if call.is_create() {
         TxKind::Create
     } else {
         TxKind::Call(to_addr(&call.to))
@@ -142,7 +142,7 @@ pub async fn run(
                     address: to_addr(addr),
                     storage_keys: slots
                         .iter()
-                        .map(|slot| to_b256(slot))
+                        .map(to_b256)
                         .collect::<Vec<B256>>(),
                 })
                 .collect::<Vec<AccessListItem>>(),
@@ -157,7 +157,7 @@ pub async fn run(
 
     let mut evm = ctx.build_mainnet_with_inspector(Tracer::default());
     let ExecResultAndState { result, state } = evm.inspect_tx(tx)?;
-    let tracer = std::mem::take(&mut evm.inspector().traces);
+    let steps = std::mem::take(&mut evm.inspector().traces);
 
     let from_u256 = |u: U256| -> Int { Int::from(&u.to_be_bytes::<32>()[..]) };
     let from_b256 = |b: B256| -> Int { Int::from(b.as_slice()) };
@@ -250,7 +250,7 @@ pub async fn run(
                 Acc::from(addr.as_slice()).to::<32>(),
                 Buf(code.to_vec()),
                 gas.used() as i64,
-                tracer.into(),
+                steps,
                 snapshot,
             )),
             Output::Create(_, None) => Err(eyre::eyre!("contract creation: no address")),
@@ -258,7 +258,7 @@ pub async fn run(
                 Int::from(1u64),
                 Buf(bytes.to_vec()),
                 gas.used() as i64,
-                tracer.into(),
+                steps,
                 snapshot,
             )),
         },
@@ -266,14 +266,14 @@ pub async fn run(
             Int::from(0u64),
             Buf(output.to_vec()),
             gas.used() as i64,
-            tracer.into(),
+            steps,
             snapshot,
         )),
         ExecutionResult::Halt { gas, .. } => Ok((
             Int::from(0u64),
             Buf::default(),
             gas.used() as i64,
-            tracer.into(),
+            steps,
             snapshot,
         )),
     }

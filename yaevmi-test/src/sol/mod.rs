@@ -1,7 +1,7 @@
 use std::{collections::HashMap, fs::File, io::BufReader};
 
 use serde::Deserialize;
-use yaevmi_base::{Acc, Int, acc, int, math::lift};
+use yaevmi_base::{Int, math::lift};
 use yaevmi_core::{
     Call, Head, Tx,
     cache::{Cache, Env},
@@ -14,6 +14,7 @@ use yaevmi_misc::buf::Buf;
 use crate::eth::EmptyChain;
 
 pub mod auths;
+pub mod count;
 
 #[derive(Deserialize)]
 pub struct Combined {
@@ -52,13 +53,9 @@ pub async fn run(
         }
     }
 
-    // TODO: pre-call gas accounting
-
     let mut exe = Executor::new(call);
-    let mut chain = EmptyChain;
-    let res = exe.run(tx, head, &mut state, &mut chain).await?;
-
-    // TODO: post-call gas accounting
+    let chain = EmptyChain;
+    let res = exe.run(tx, head, &mut state, &chain).await?;
 
     let steps = state
         .events
@@ -87,57 +84,4 @@ fn test_load_combined_json() {
     let combined = load().unwrap();
     assert!(!combined.contracts.is_empty());
     assert!(combined.contracts.contains_key("sol/hello.sol:Hello"));
-}
-
-#[tokio::test]
-async fn test_deploy_counter() -> eyre::Result<()> {
-    let combined = load()?;
-    let contract = &combined.contracts["sol/count.sol:Count"];
-
-    let sender = acc("0xAA");
-    let nonce = Int::ZERO;
-
-    let env = vec![(
-        sender,
-        Account {
-            value: ethers(1),
-            nonce,
-            code: (Buf::default(), Int::ZERO),
-        },
-        vec![],
-    )];
-    let head = Head {
-        number: 1,
-        hash: int("0x1"),
-        gas_limit: 1_000_000.into(),
-        coinbase: acc("0xC014BA5E"),
-        timestamp: 42.into(),
-        base_fee: 1.into(),
-        blob_base_fee: 1.into(),
-        chain_id: 1,
-        blobhash: Int::ONE,
-        prevrandao: Int::ONE,
-    };
-    let call = Call {
-        by: sender,
-        to: Acc::ZERO,
-        gas: 1_000_000,
-        eth: Int::ZERO,
-        data: contract.bin.clone(),
-    };
-    let tx = Tx {
-        nonce: None,
-        gas_price: 1.into(),
-        max_fee_per_gas: 1.into(),
-        max_priority_fee_per_gas: 1.into(),
-        access_list: vec![],
-        authorization_list: vec![],
-        blob_hashes: vec![],
-        max_fee_per_blob_gas: 1.into(),
-    };
-
-    let exp = crate::revm::run(call.clone(), head.clone(), env.clone(), tx.clone()).await?;
-    let res = run(call, head, env, tx).await?;
-    pretty_assertions::assert_eq!(res, exp);
-    Ok(())
 }

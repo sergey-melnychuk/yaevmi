@@ -44,15 +44,15 @@ impl Chain for EmptyChain {
 }
 
 /// Build a map from addresses to account states.
-pub fn build_map(env: Env) -> HashMap<Acc, dto::AccountState> {
-    env.into_iter()
+pub fn build_map(env: &Env) -> HashMap<Acc, dto::AccountState> {
+    env.iter()
         .map(|(acc, account, storage)| {
-            let storage = storage.into_iter().collect();
+            let storage = storage.iter().cloned().collect();
             (
-                acc,
+                *acc,
                 dto::AccountState {
                     balance: account.value,
-                    code: account.code.0,
+                    code: account.code.0.clone(),
                     nonce: account.nonce,
                     storage,
                 },
@@ -128,7 +128,7 @@ pub fn build_call_tx(tc: &TestCase, idx: &dto::Indexes) -> (Call, Tx) {
                 .and_then(|v| v.as_ref())
                 .map(|vec| {
                     vec.iter()
-                        .map(|a| (a.address, a.storage_keys.iter().copied().collect()))
+                        .map(|a| (a.address, a.storage_keys.to_vec()))
                         .collect::<Vec<(Acc, Vec<Int>)>>()
                 })
                 .unwrap_or_default(),
@@ -171,7 +171,7 @@ pub async fn run_entry(tc: &TestCase, entry: &PostEntry) -> eyre::Result<()> {
     };
 
     // Validate explicit post-state when present in the fixture.
-    let map = build_map(snapshot);
+    let map = build_map(&snapshot);
     for (addr, expected) in &entry.state {
         let actual_balance = map.get(addr).map(|a| a.balance).unwrap_or_default();
         eyre::ensure!(
@@ -325,13 +325,8 @@ async fn test_general_state_cancun() -> eyre::Result<()> {
         failed.extend_from_slice(&fs);
     }
 
-    let take = failed.len() / 1;
-    for s in failed.iter().take(take) {
+    for s in &failed {
         println!("---\n{s}");
-    }
-    let left = failed.len() - take;
-    if left > 0 {
-        println!("(skipped {} more failures)", left);
     }
 
     println!("\n=== GeneralStateTests/{FORK} ===");

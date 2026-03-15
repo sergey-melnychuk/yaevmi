@@ -3,10 +3,10 @@ pragma solidity ^0.8.34;
 
 contract Caller {
     Callee private callee;
-    uint private timestamp;
+    uint private x;
 
-    constructor() {
-        timestamp = block.timestamp;
+    constructor(uint x_) {
+        x = x_;
     }
 
     function create() external returns (address) {
@@ -21,11 +21,7 @@ contract Caller {
     }
 
     function callback(uint a, uint b) external view returns (uint) {
-        if (timestamp + a < block.timestamp) {
-            return a;
-        } else {
-            return b;
-        }
+        return a + b - x;
     }
 }
 
