@@ -17,5 +17,5 @@ yaevmi-misc.workspace = true
 futures = "0.3"
 k256 = { version = "0.13", features = ["ecdsa"] }
 pretty_assertions = "1.4.1"
-revm = { version = "36.0.0", features = ["optional_block_gas_limit", "optional_no_base_fee"] }
+revm = "36.0.0"
 tokio = { version = "1.50.0", features = ["full"] }

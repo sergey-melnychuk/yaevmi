@@ -32,7 +32,6 @@ pub struct Executor {
 
 pub struct CallFrame {
     pub call: Call,
-    // pub mode: CallMode,
     pub evm: Evm,
     pub ctx: Context,
     pub checkpoint: usize,
@@ -108,7 +107,7 @@ impl Executor {
 
         let pre_charge = pre_charge(&self.call);
 
-        let mut frame = prepare(head, self.call.clone(), mode, None, state, chain).await?;
+        let mut frame = prepare(head.clone(), self.call.clone(), mode, None, state, chain).await?;
         let _ = frame.evm.gas_charge(pre_charge); // TODO: check for OOG
         self.callstack.push(frame);
 
@@ -195,28 +194,6 @@ impl Executor {
                     self.callstack.pop();
                 }
                 StepResult::Call(call, mode) => {
-                    /*fn precompile(
-                        evm: &mut Evm,
-                        call: &Call,
-                        mode: &CallMode,
-                    ) -> crate::evm::EvmResult<()> {
-                        let (ok, out, gas_used) =
-                            crate::pre::run(call.to.as_u64(), &call.data.0, call.gas as i64);
-                        if ok {
-                            evm.gas_charge(gas_used)?;
-                            let (ret_offset, ret_size) = mode.range();
-                            let n = ret_size.min(out.len());
-                            if n > 0 {
-                                evm.mem_put(ret_offset, n, &out[..n])?;
-                            }
-                            evm.push(Int::ONE)?;
-                        } else {
-                            evm.gas_charge(call.gas as i64)?;
-                            evm.push(Int::ZERO)?;
-                        }
-                        Ok(())
-                    }*/
-
                     if is_precompile(&call.to) {
                         // Precompile runs inline. Replace child-gas reservation with actual used
                         // (avoids OOG when child_gas > remaining); keep access cost.
@@ -296,8 +273,15 @@ impl Executor {
                         }
                     }
 
-                    let frame =
-                        prepare(head, call.clone(), mode, Some(&this.ctx), state, chain).await?;
+                    let frame = prepare(
+                        head.clone(),
+                        call.clone(),
+                        mode,
+                        Some(&this.ctx),
+                        state,
+                        chain,
+                    )
+                    .await?;
                     if frame.ctx.depth > MAX_CALL_DEPTH {
                         state.revert_to(checkpoint);
                         let _ = this.evm.push(Int::ZERO);

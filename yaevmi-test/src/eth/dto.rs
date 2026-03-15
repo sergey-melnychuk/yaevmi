@@ -59,12 +59,16 @@ pub struct AccessListEntry {
 }
 
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PostEntry {
     pub indexes: Indexes,
     pub hash: Int,
     pub logs: Int,
     #[serde(default)]
     pub state: HashMap<Acc, AccountState>,
+    /// When set, the test expects the transaction to fail (validation or execution).
+    #[serde(default, rename = "expectException")]
+    pub expect_exception: Option<String>,
 }
 
 #[derive(Deserialize)]

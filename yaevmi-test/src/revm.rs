@@ -7,7 +7,7 @@ use revm::database::InMemoryDB;
 use revm::inspector::InspectorEvmTr;
 use revm::interpreter::interpreter_types::{Immediates, Jumps};
 use revm::interpreter::{Interpreter, interpreter::EthInterpreter};
-use revm::primitives::{Address, B256, Bytes, TxKind, U256};
+use revm::primitives::{Address, B256, Bytes, TxKind, U256, hardfork::SpecId};
 use revm::state::AccountInfo;
 use revm::{Context, InspectEvm, Inspector, MainBuilder, MainContext};
 use yaevmi_base::{Acc, Int};
@@ -106,11 +106,21 @@ pub async fn run(
     ctx.block.beneficiary = to_addr(&head.coinbase);
     ctx.block.basefee = head.base_fee.as_u64();
     ctx.block.prevrandao = Some(to_b256(&head.prevrandao));
-    ctx.cfg.chain_id = head.chain_id as u64;
 
-    ctx.cfg.disable_block_gas_limit = true;
-    ctx.cfg.disable_base_fee = true;
-    ctx.cfg.tx_gas_limit_cap = Some(u64::MAX);
+    ctx.cfg.chain_id = head.chain_id as u64;
+    ctx.cfg.set_spec_and_mainnet_gas_params(SpecId::CANCUN);
+
+    // For legacy tx (max_fee_per_gas=0), use gas_price for effective fee
+    let max_fee = if tx.max_fee_per_gas.is_zero() {
+        tx.gas_price.as_u128()
+    } else {
+        tx.max_fee_per_gas.as_u128()
+    };
+    let priority_fee = if tx.max_fee_per_gas.is_zero() {
+        tx.gas_price.as_u128()
+    } else {
+        tx.max_priority_fee_per_gas.as_u128()
+    };
 
     let kind = if call.to.is_zero() {
         TxKind::Create
@@ -137,8 +147,8 @@ pub async fn run(
                 })
                 .collect::<Vec<AccessListItem>>(),
         ))
-        .max_fee_per_gas(tx.max_fee_per_gas.as_u128())
-        .gas_priority_fee(Some(tx.max_priority_fee_per_gas.as_u128()))
+        .max_fee_per_gas(max_fee)
+        .gas_priority_fee(Some(priority_fee))
         .authorization_list(vec![])
         .blob_hashes(vec![])
         .max_fee_per_blob_gas(Int::ZERO.as_u128())
@@ -152,11 +162,41 @@ pub async fn run(
     let from_u256 = |u: U256| -> Int { Int::from(&u.to_be_bytes::<32>()[..]) };
     let from_b256 = |b: B256| -> Int { Int::from(b.as_slice()) };
 
-    let mut snapshot: Env = Vec::with_capacity(state.len());
+    // Build snapshot: state from inspect_tx contains only modified accounts.
+    // Merge with pre-state (env) so we include untouched accounts.
+    let mut snapshot: std::collections::HashMap<Acc, (Account, Vec<(Int, Int)>)> = env
+        .iter()
+        .map(|(acc, account, storage)| {
+            let mut kv: Vec<_> = storage.iter().map(|(k, v)| (*k, *v)).collect();
+            kv.sort_by_key(|(k, _)| *k);
+            (
+                *acc,
+                (
+                    Account {
+                        value: account.value,
+                        nonce: account.nonce,
+                        code: account.code.clone(),
+                    },
+                    kv,
+                ),
+            )
+        })
+        .collect();
+
+    let selfdestructed: std::collections::HashSet<_> = state
+        .iter()
+        .filter(|(_, a)| a.is_selfdestructed())
+        .map(|(addr, _)| Acc::from(addr.as_slice()))
+        .collect();
+    for addr in &selfdestructed {
+        snapshot.remove(addr);
+    }
+
     for (addr, account) in &state {
         if account.is_selfdestructed() {
             continue;
         }
+        let acc = Acc::from(addr.as_slice());
         let code_bytes = account
             .info
             .code
@@ -168,22 +208,40 @@ pub async fn run(
         } else {
             from_b256(account.info.code_hash)
         };
-        let mut kv: Vec<_> = account
+        let state_storage: std::collections::HashMap<_, _> = account
             .storage
             .iter()
             .map(|(slot, val)| (from_u256(*slot), from_u256(val.present_value)))
             .collect();
+        // Merge storage: state may only have modified slots; overlay on pre-state
+        let mut kv: Vec<_> = snapshot
+            .get(&acc)
+            .map(|(_, s)| s.clone())
+            .unwrap_or_default()
+            .into_iter()
+            .collect();
+        for (k, v) in &state_storage {
+            kv.retain(|(kk, _)| kk != k);
+            kv.push((*k, *v));
+        }
         kv.sort_by_key(|(k, _)| *k);
-        snapshot.push((
-            Acc::from(addr.as_slice()),
-            Account {
-                value: from_u256(account.info.balance),
-                nonce: Int::from(account.info.nonce),
-                code: (Buf(code_bytes), code_hash),
-            },
-            kv,
-        ));
+        snapshot.insert(
+            acc,
+            (
+                Account {
+                    value: from_u256(account.info.balance),
+                    nonce: Int::from(account.info.nonce),
+                    code: (Buf(code_bytes), code_hash),
+                },
+                kv,
+            ),
+        );
     }
+
+    let mut snapshot: Env = snapshot
+        .into_iter()
+        .map(|(acc, (account, kv))| (acc, account, kv))
+        .collect();
     snapshot.sort_by_key(|(acc, _, _)| *acc);
 
     match result {

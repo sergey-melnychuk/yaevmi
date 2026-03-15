@@ -83,7 +83,7 @@ pub fn ethers(eth: i32) -> Int {
 }
 
 #[test]
-fn test_load() {
+fn test_load_combined_json() {
     let combined = load().unwrap();
     assert!(!combined.contracts.is_empty());
     assert!(combined.contracts.contains_key("sol/hello.sol:Hello"));

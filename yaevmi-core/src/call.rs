@@ -88,7 +88,7 @@ impl Builder {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct Head {
     pub number: u64,
     pub hash: Int,
