@@ -194,7 +194,7 @@ pub async fn run_entry(tc: &TestCase, entry: &PostEntry) -> eyre::Result<()> {
             let have = map[addr].storage.get(key).copied().unwrap_or(Int::ZERO);
             eyre::ensure!(
                 have == *want,
-                "\n for {addr:?}[{key:?}]:\nhave {have:?}\nwant {want:?}"
+                "\n for {addr:?}[{key:?}] slot:\nhave {have:?}\nwant {want:?}"
             );
         }
     }

@@ -96,12 +96,10 @@ impl Gas {
     }
 
     pub fn refund(&mut self, gas: i64) -> EvmResult<()> {
-        let rem = self.remaining();
-        if rem + gas >= 0 {
+        if self.refund + gas >= 0 {
             self.refund += gas;
             Ok(())
         } else {
-            self.spent += rem;
             Err(EvmYield::Halt(HaltReason::OutOfGas))
         }
     }
@@ -280,7 +278,7 @@ impl Evm {
     }
 
     pub fn gas_refund(&mut self, gas: i64) -> EvmResult<()> {
-        if self.gas.remaining() + self.gas.refund + gas < 0 {
+        if self.gas.refund + self.pending_gas_refund + gas < 0 {
             return Err(EvmYield::Halt(HaltReason::OutOfGas));
         }
         self.pending_gas_refund += gas;

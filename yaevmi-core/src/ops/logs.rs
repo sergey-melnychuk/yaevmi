@@ -6,7 +6,10 @@ use crate::{
 
 const LOG0: u8 = 0xA0;
 
-pub fn log(evm: &mut Evm, _: &Context, _: &Call, state: &mut dyn State) -> EvmResult<()> {
+pub fn log(evm: &mut Evm, ctx: &Context, _: &Call, state: &mut dyn State) -> EvmResult<()> {
+    if ctx.is_static {
+        return Err(EvmYield::Halt(HaltReason::NonStatic));
+    }
     let n: usize = (evm.code[evm.pc] - LOG0) as usize;
     let total = 2 + n;
     if evm.stack.len() < total {

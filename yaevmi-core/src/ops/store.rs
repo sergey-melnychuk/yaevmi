@@ -114,6 +114,9 @@ fn sstore_gas(val: Int, cur: Int, org: Int) -> (i64, i64) {
 }
 
 pub fn sstore(evm: &mut Evm, ctx: &Context, _: &Call, state: &mut dyn State) -> EvmResult<()> {
+    if ctx.is_static {
+        return Err(EvmYield::Halt(HaltReason::NonStatic));
+    }
     let [key, val] = evm.peek()?;
     let acc = ctx.this;
     let Some((cur, org)) = state.get(&acc, &key) else {
@@ -202,6 +205,9 @@ pub fn tload(evm: &mut Evm, ctx: &Context, _: &Call, state: &mut dyn State) -> E
 }
 
 pub fn tstore(evm: &mut Evm, ctx: &Context, _: &Call, state: &mut dyn State) -> EvmResult<()> {
+    if ctx.is_static {
+        return Err(EvmYield::Halt(HaltReason::NonStatic));
+    }
     evm.gas_charge(100)?;
     let [key, val] = evm.peek()?;
     state.tput(ctx.this, key, val);

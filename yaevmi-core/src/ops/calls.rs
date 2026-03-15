@@ -5,7 +5,7 @@ use yaevmi_misc::keccak256;
 use crate::{
     Call,
     aux::{create_address, create2_address, is_precompile},
-    evm::{self, CallMode, Context, Evm, EvmResult, EvmYield, Fetch},
+    evm::{self, CallMode, Context, Evm, EvmResult, EvmYield, Fetch, HaltReason},
     state::State,
 };
 
@@ -16,6 +16,9 @@ fn sub_call_gas(evm: &Evm) -> u64 {
 }
 
 pub fn create(evm: &mut Evm, ctx: &Context, _: &Call, state: &mut dyn State) -> EvmResult<()> {
+    if ctx.is_static {
+        return Err(EvmYield::Halt(HaltReason::NonStatic));
+    }
     evm.gas_charge(32_000)?;
     let [value, offset, size] = evm.peek()?;
     let (offset, size) = (offset.as_usize(), size.as_usize());
@@ -77,6 +80,9 @@ pub fn call(evm: &mut Evm, ctx: &Context, _: &Call, state: &mut dyn State) -> Ev
 
     // Value transfer cost
     let has_value = !value.is_zero();
+    if ctx.is_static && has_value {
+        return Err(EvmYield::Halt(HaltReason::NonStatic));
+    }
     if has_value {
         evm.gas_charge(9000)?;
     }
@@ -234,6 +240,9 @@ pub fn delegatecall(
 }
 
 pub fn create2(evm: &mut Evm, ctx: &Context, _: &Call, _: &mut dyn State) -> EvmResult<()> {
+    if ctx.is_static {
+        return Err(EvmYield::Halt(HaltReason::NonStatic));
+    }
     evm.gas_charge(32_000)?;
     let [value, offset, size, salt] = evm.peek()?;
     let (offset, size) = (offset.as_usize(), size.as_usize());
