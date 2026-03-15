@@ -22,7 +22,7 @@ const CODE_DEPOSIT_GAS: i64 = 200;
 #[derive(Debug)]
 pub enum CallResult {
     Done { status: Int, ret: Buf, gas: Gas },
-    Created { addr: Acc, code: Buf, gas: Gas },
+    Created { acc: Acc, code: Buf, gas: Gas },
 }
 
 impl CallResult {
@@ -177,7 +177,7 @@ impl Executor {
         chain: &impl Chain,
     ) -> Result<CallResult> {
         if !self.callstack.is_empty() {
-            return Err(Error::InconsistentState);
+            return Err(Error::Internal("inconsistent state detected".into()));
         }
 
         let mode = if self.call.is_create() {
@@ -189,6 +189,11 @@ impl Executor {
         };
 
         let (intrinsic, effective_gas_price) = intrinsic(&self.call, &tx, &head, state);
+
+        if (self.call.gas as i64) < intrinsic {
+            return Err(Error::GasTooLow { have: self.call.gas, want: intrinsic as u64 });
+        }
+
         transfer(&self.call, &mode, state);
 
         state.inc_nonce(&self.call.by, Int::ONE);
@@ -238,7 +243,7 @@ impl Executor {
                         stipend = 0;
                         result = None;
                     }
-                    CallResult::Created { addr, code, gas } => {
+                    CallResult::Created { acc: addr, code, gas } => {
                         if !code.0.is_empty() {
                             let hash = Int::from(keccak256(code.as_slice()).as_ref());
                             state.acc_mut(&addr).code = (code, hash);
@@ -264,7 +269,7 @@ impl Executor {
                     let gas = this.evm.gas;
                     result = Some(if is_create {
                         CallResult::Created {
-                            addr: this.ctx.this,
+                            acc: this.ctx.this,
                             code: vec![].into(),
                             gas,
                         }
@@ -413,17 +418,9 @@ impl Executor {
                             }
                         } else {
                             this.evm.gas.spent += deploy_cost;
-                            let created = this.ctx.this;
-                            state.create(
-                                created,
-                                Account {
-                                    value: Int::ZERO,
-                                    nonce: Int::ONE,
-                                    code: (Buf::default(), Int::ZERO),
-                                },
-                            );
+                            state.acc_mut(&this.ctx.this).nonce = Int::ONE;
                             CallResult::Created {
-                                addr: created,
+                                acc: this.ctx.this,
                                 code: ret.into(),
                                 gas: this.evm.gas,
                             }
@@ -463,10 +460,10 @@ impl Executor {
             }
         }
 
-        let mut result = result.ok_or(Error::CallResultMissing)?;
+        let mut result = result.ok_or(Error::Internal("call result missing".into()))?;
 
         // For top-level CREATE, store the deployed bytecode into the new account.
-        if let CallResult::Created { addr, ref code, .. } = result
+        if let CallResult::Created { acc: addr, ref code, .. } = result
             && !code.0.is_empty()
         {
             let hash = Int::from(keccak256(code.as_slice()).as_ref());

@@ -69,7 +69,7 @@ pub async fn run(
     let snapshot = state.snapshot();
 
     Ok(match res {
-        CallResult::Created { addr, code, gas } => (addr.to(), code, gas.spent, steps, snapshot),
+        CallResult::Created { acc: addr, code, gas } => (addr.to(), code, gas.spent, steps, snapshot),
         CallResult::Done { status, ret, gas } => (status, ret, gas.spent, steps, snapshot),
     })
 }

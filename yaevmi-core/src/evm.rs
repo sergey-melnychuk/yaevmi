@@ -92,7 +92,7 @@ impl Gas {
     }
 
     pub fn remaining(&self) -> i64 {
-        self.limit + self.refund - self.spent
+        self.limit - self.spent //+ self.refund
     }
 
     pub fn refund(&mut self, gas: i64) -> EvmResult<()> {

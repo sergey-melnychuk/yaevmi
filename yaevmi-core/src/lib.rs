@@ -21,12 +21,8 @@ pub mod trace;
 
 #[derive(Error, Debug)]
 pub enum Error {
-    #[error("Data missing: {0:?}")]
-    MissingData(Fetch),
-    #[error("Call result missing")]
-    CallResultMissing,
-    #[error("Inconsistent state")]
-    InconsistentState,
+    #[error("Gas too low: have {have} but want {want}")]
+    GasTooLow { have: u64, want: u64 },
     #[error("Generic error: {0}")]
     Generic(#[from] eyre::Report),
     #[error("Internal error: {0}")]
