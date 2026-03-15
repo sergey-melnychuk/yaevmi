@@ -176,29 +176,69 @@ impl<const N: usize> serde::Serialize for Hex<N> {
 
 impl<'de, const N: usize> serde::Deserialize<'de> for Hex<N> {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        let s = <&str>::deserialize(d)?;
-        let s = s.strip_prefix("0x").unwrap_or(s);
-        let bytes = hex::decode(s).map_err(serde::de::Error::custom)?;
-        if bytes.len() > N {
-            return Err(serde::de::Error::custom(format!(
-                "hex value too long: {} bytes, max {N}",
-                bytes.len()
-            )));
+        let s = String::deserialize(d)?;
+        let hex = s.strip_prefix("0x").unwrap_or(&s);
+        let ok = hex.as_bytes().iter().all(|&c| match c {
+            b'0'..=b'9' => true,
+            b'a'..=b'f' => true,
+            b'A'..=b'F' => true,
+            _ => false,
+        });
+        if !ok {
+            return Err(serde::de::Error::custom("hex literal invalid"));
         }
-        Ok(Self::from(&bytes[..]))
+        if hex.len() > 2 * N {
+            return Err(serde::de::Error::custom("hex literal too long"));
+        }
+        let bytes = parse(&s);
+        Ok(Self(bytes))
     }
 }
 
+pub fn parse_vec(s: &str) -> Result<Vec<u8>, &'static str> {
+    let skip = if s.len() >= 2 && s.as_bytes()[0] == b'0' && s.as_bytes()[1] == b'x' {
+        2
+    } else {
+        0
+    };
+    let len = s.len() - skip;
+    let n = len.div_ceil(2);
+    let offset = n * 2 - len;
+    let mut ret = vec![0u8; n];
+    for j in skip..s.len() {
+        let c = s.as_bytes()[j];
+        let d = match c {
+            b'0'..=b'9' => c - b'0',
+            b'a'..=b'f' => c - b'a' + 10,
+            b'A'..=b'F' => c - b'A' + 10,
+            _ => return Err("hex literal invalid"),
+        };
+        let k = j - skip;
+        let i = offset + k;
+        let b = i / 2;
+        if i.is_multiple_of(2) {
+            ret[b] = d << 4;
+        } else {
+            ret[b] |= d;
+        }
+    }
+    Ok(ret)
+}
+
+
 pub const fn parse<const N: usize>(s: &str) -> [u8; N] {
-    if s.len() > N * 2 {
+    let skip = if s.len() >= 2 && s.as_bytes()[0] == b'0' && s.as_bytes()[1] == b'x' {
+        2
+    } else {
+        0
+    };
+    if s.len() - skip > N * 2 {
         panic!("hex literal too long");
     }
-    let offset = N * 2 - s.len();
+    let len = s.len() - skip;
+    let offset = N * 2 - len;
     let mut ret = [0u8; N];
-    let mut j = 0;
-    if s.len() >= 2 && s.as_bytes()[0] == b'0' && s.as_bytes()[1] == b'x' {
-        j = 2;
-    }
+    let mut j = skip;
     while j < s.len() {
         let c = s.as_bytes()[j];
         let d = match c {
@@ -207,7 +247,7 @@ pub const fn parse<const N: usize>(s: &str) -> [u8; N] {
             b'A'..=b'F' => c - b'A' + 10,
             _ => panic!("hex literal invalid"),
         };
-        let i = offset + j;
+        let i = offset + (j - skip);
         let b = i / 2;
         if i.is_multiple_of(2) {
             ret[b] = d << 4;
@@ -254,9 +294,23 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_with_prefix() {
+        assert_eq!(parse::<4>("0xdeadbeef"), [0xde, 0xad, 0xbe, 0xef]);
+        assert_eq!(parse::<1>("0xff"), [0xff]);
+        assert_eq!(parse::<4>("0xbeef"), [0x00, 0x00, 0xbe, 0xef]);
+        assert_eq!(parse::<4>("0x1"), [0x00, 0x00, 0x00, 0x01]);
+    }
+
+    #[test]
     #[should_panic]
     fn test_parse_too_long() {
         let _ = parse::<4>("deadbeef00");
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_parse_too_long_with_prefix() {
+        let _ = parse::<4>("0xdeadbeef00");
     }
 
     #[test]
@@ -287,5 +341,38 @@ mod tests {
         let s = serde_json::to_string(&h).unwrap();
         let h2: Hex<4> = serde_json::from_str(&s).unwrap();
         assert_eq!(h, h2);
+    }
+
+    #[test]
+    fn test_parse_vec_empty() {
+        assert_eq!(parse_vec("").unwrap(), vec![] as Vec<u8>);
+        assert_eq!(parse_vec("0x").unwrap(), vec![] as Vec<u8>);
+    }
+
+    #[test]
+    fn test_parse_vec_no_prefix() {
+        assert_eq!(parse_vec("abcd").unwrap(), vec![0xab, 0xcd]);
+        assert_eq!(parse_vec("ff").unwrap(), vec![0xff]);
+        assert_eq!(parse_vec("1").unwrap(), vec![0x01]);
+        assert_eq!(parse_vec("deadbeef").unwrap(), vec![0xde, 0xad, 0xbe, 0xef]);
+    }
+
+    #[test]
+    fn test_parse_vec_with_prefix() {
+        assert_eq!(parse_vec("0xabcd").unwrap(), vec![0xab, 0xcd]);
+        assert_eq!(parse_vec("0xff").unwrap(), vec![0xff]);
+        assert_eq!(parse_vec("0x1").unwrap(), vec![0x01]);
+        assert_eq!(parse_vec("0xdeadbeef").unwrap(), vec![0xde, 0xad, 0xbe, 0xef]);
+    }
+
+    #[test]
+    fn test_parse_vec_odd_nibble() {
+        assert_eq!(parse_vec("abc").unwrap(), vec![0x0a, 0xbc]);
+        assert_eq!(parse_vec("0xabc").unwrap(), vec![0x0a, 0xbc]);
+    }
+
+    #[test]
+    fn test_parse_vec_invalid_char() {
+        assert!(parse_vec("0xgg").is_err());
     }
 }
