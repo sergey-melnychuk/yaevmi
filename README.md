@@ -9,7 +9,7 @@
 - **Correctness & observability** over raw performance — full tracing, clean error types, inspectable state at every step
 - **Zero infrastructure** — simulate any transaction against a forked or mock state without running a node
 
-Intended for: educational tooling, transaction debugging, independent simulation, and testing infrastructure. Forking real chain state requires an RPC node (e.g. via `eth_getStorageAt`, `eth_getBalance`, etc.).
+Intended for: educational tooling, transaction debugging, independent simulation, and testing infrastructure. Forking real chain state requires an RPC node (e.g. for `eth_getStorageAt`, `eth_getBalance`, etc.).
 
 ## Crates
 
@@ -21,3 +21,26 @@ Intended for: educational tooling, transaction debugging, independent simulation
 | `yaevmi-wasm` | WebAssembly bindings |
 | `yaevmi-test` | Test harness and fixtures |
 | `yaevmi-full` | Full integration: ties all crates together |
+
+## Tests
+
+Running against `GeneralStateTests`:
+
+```bash
+cargo test -p yaevmi-test
+
+## Make sure you have test fixtures cloned and extracted locally:
+git clone --depth 1 https://github.com/ethereum/tests yaevmi-test/tests
+cd yaevmi-test/tests && tar -xzf fixtures_general_state_tests.tgz
+```
+
+## WebAssembly
+
+Web is a first-class build & usage target:
+
+```bash
+cd yaevmi-wasm
+wasm-pack build --target web
+python3 -m http.server
+## open http://localhost:8000/
+```
