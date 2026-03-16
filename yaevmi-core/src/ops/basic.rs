@@ -136,8 +136,17 @@ pub fn mulmod(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmRes
 }
 
 pub fn exp(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<()> {
-    evm.gas_charge(10)?;
     let [a, b] = evm.peek()?;
+    // EIP-160: 10 + 50 * exponent_byte_size
+    let exp_cost = if b.is_zero() {
+        10
+    } else {
+        use yaevmi_base::math::U256;
+        let b_u = U256::from_be_slice(b.as_ref());
+        let bit_len = 256 - b_u.leading_zeros();
+        10 + 50 * ((bit_len + 7) / 8) as i64
+    };
+    evm.gas_charge(exp_cost)?;
     let f = lift(|[a, b]| a.pow(b));
     let r = f([a, b]);
     evm.push(r)?;

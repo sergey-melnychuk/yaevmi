@@ -63,7 +63,7 @@ pub fn call(evm: &mut Evm, ctx: &Context, _: &Call, state: &mut dyn State) -> Ev
 
     if state.acc(&ctx.this).is_none() {
         return Err(EvmYield::Fetch(Fetch::Account(ctx.this)));
-    };
+    }
 
     // EIP-2929: warm/cold address access
     let access_cost: i64 = if state.warm_acc(&address) {
@@ -86,11 +86,16 @@ pub fn call(evm: &mut Evm, ctx: &Context, _: &Call, state: &mut dyn State) -> Ev
         evm.gas_charge(9000)?;
     }
 
-    // New account cost (sending value to dead account per EIP-161)
+    // New account cost (sending value to dead account per EIP-161).
+    // Must load callee before charging: if not in state, fetch to determine emptiness.
+    if state.acc(&address).is_none() {
+        return Err(EvmYield::Fetch(Fetch::Account(address)));
+    }
     let is_empty = state
         .acc(&address)
         .map(|a| a.value.is_zero() && a.nonce.is_zero() && a.code.0.0.is_empty())
         .unwrap_or(true);
+    // EIP-161: only charge when BOTH value>0 AND account is dead (empty).
     if has_value && is_empty {
         evm.gas_charge(25000)?;
     }
@@ -185,8 +190,8 @@ pub fn r#return(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmR
 
 pub fn delegatecall(
     evm: &mut Evm,
-    ctx: &Context,
-    _: &Call,
+    _ctx: &Context,
+    call: &Call,
     state: &mut dyn State,
 ) -> EvmResult<()> {
     let [
@@ -222,8 +227,9 @@ pub fn delegatecall(
 
     let data = evm.mem_get(args_offset, args_size)?;
 
-    let call = Call {
-        by: ctx.this,
+    // DELEGATECALL preserves msg.sender (caller) from the parent frame
+    let inner_call = Call {
+        by: call.by,
         to: address,
         gas,
         eth: Int::ZERO,
@@ -231,7 +237,7 @@ pub fn delegatecall(
     };
 
     Err(EvmYield::Call(
-        call,
+        inner_call,
         CallMode::Delegate(ret_offset, ret_size),
     ))
 }

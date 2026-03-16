@@ -268,8 +268,15 @@ impl Executor {
                                 let _ = this.evm.mem_put(offset, size, ret.as_slice());
                             }
                         }
-                        let gas_sent = gas.limit - stipend;
-                        let return_gas = (gas.limit - gas.spent).max(0).min(gas_sent);
+                        // When child succeeds: return all unused gas (including stipend).
+                        // When child fails: cap return at gas_sent (stipend is not returned).
+                        let unused = (gas.limit - gas.spent).max(0);
+                        let return_gas = if status.is_zero() {
+                            let gas_sent = gas.limit - stipend;
+                            unused.min(gas_sent)
+                        } else {
+                            unused
+                        };
                         this.evm.gas.spent -= return_gas;
                         this.evm.gas.refund += gas.refund;
                         this.evm.apply(state);
@@ -300,6 +307,7 @@ impl Executor {
                     continue;
                 }
                 StepResult::End => {
+                    this.evm.apply(state);
                     let is_create = this.call.is_create();
                     let gas = this.evm.gas;
                     result = Some(if is_create {
@@ -318,11 +326,15 @@ impl Executor {
                     self.callstack.pop();
                 }
                 StepResult::Call(call, mode) => {
+                    this.evm.apply(state);
                     if is_precompile(&call.to) {
+                        // EIP-211: clear return data before new call
+                        this.evm.ret.clear();
                         // Precompile runs inline. Replace child-gas reservation with actual used
                         // (avoids OOG when child_gas > remaining); keep access cost.
                         let (ok, out, gas_used) =
                             crate::pre::run(call.to.as_u64(), &call.data.0, call.gas as i64);
+                        this.evm.ret = out.clone();
                         this.evm.pending_gas_charge -= call.gas as i64;
                         this.evm.pending_gas_charge += gas_used;
                         let status = if ok { Int::ONE } else { Int::ZERO };
@@ -430,6 +442,9 @@ impl Executor {
                         }
                     }
 
+                    // EIP-211: clear return data buffer when making a new call
+                    this.evm.ret.clear();
+
                     let frame = prepare(
                         tx.clone(),
                         head.clone(),
@@ -520,6 +535,7 @@ impl Executor {
                     self.callstack.pop();
                 }
                 StepResult::Halt(_reason) => {
+                    this.evm.apply(state);
                     this.evm.gas.drain();
                     state.revert_to(this.checkpoint);
                     result = Some(CallResult::Done {

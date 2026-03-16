@@ -117,6 +117,10 @@ pub fn sstore(evm: &mut Evm, ctx: &Context, _: &Call, state: &mut dyn State) -> 
     if ctx.is_static {
         return Err(EvmYield::Halt(HaltReason::NonStatic));
     }
+    // EIP-2200: reentrancy sentinel - SSTORE fails if gasleft <= 2300 (call stipend)
+    if evm.gas_remaining() <= 2300 {
+        return Err(EvmYield::Halt(HaltReason::OutOfGas));
+    }
     let [key, val] = evm.peek()?;
     let acc = ctx.this;
     let Some((cur, org)) = state.get(&acc, &key) else {

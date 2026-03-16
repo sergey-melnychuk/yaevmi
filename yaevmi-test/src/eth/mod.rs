@@ -8,7 +8,10 @@ use std::{
     },
 };
 
-use yaevmi_base::{Acc, Int, math::{ONE, ZERO, lift}};
+use yaevmi_base::{
+    Acc, Int,
+    math::{ONE, ZERO, lift},
+};
 use yaevmi_core::{Call, Head, Tx, cache::Env, chain::Chain, state::Account};
 
 use dto::{PostEntry, TestCase};
@@ -177,13 +180,15 @@ pub async fn run_entry(tc: &TestCase, entry: &PostEntry) -> eyre::Result<()> {
         eyre::ensure!(
             actual_balance == expected.balance,
             "\n for {addr:?} balance:\nhave {actual_balance:?} ({:+})\nwant {:?}",
-            diff(expected.balance, actual_balance), expected.balance
+            diff(expected.balance, actual_balance),
+            expected.balance
         );
         let actual_nonce = map.get(addr).map(|a| a.nonce).unwrap_or_default();
         eyre::ensure!(
             actual_nonce == expected.nonce,
             "\n for {addr:?} nonce:\nhave {actual_nonce} ({:+})\nwant {}",
-            diff(expected.nonce, actual_nonce), expected.nonce
+            diff(expected.nonce, actual_nonce),
+            expected.nonce
         );
         let actual_code = map.get(addr).map(|a| a.code.as_slice()).unwrap_or_default();
         eyre::ensure!(
@@ -202,7 +207,7 @@ pub async fn run_entry(tc: &TestCase, entry: &PostEntry) -> eyre::Result<()> {
 }
 
 fn diff(want: Int, have: Int) -> i64 {
-    let gte = lift(|[a, b]| if a >= b {ONE} else {ZERO});
+    let gte = lift(|[a, b]| if a >= b { ONE } else { ZERO });
     let sub = lift(|[a, b]| a - b);
     if !gte([have, want]).is_zero() {
         sub([have, want]).as_u64() as i64
