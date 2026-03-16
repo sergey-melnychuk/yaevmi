@@ -696,7 +696,7 @@ async fn prepare(
         Context {
             origin: call.by,
             is_static,
-            depth: 1,
+            depth: 0,
             this,
         }
     };

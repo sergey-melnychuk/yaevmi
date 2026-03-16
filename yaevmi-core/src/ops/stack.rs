@@ -5,7 +5,7 @@ use crate::{
 };
 
 pub fn push(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<()> {
-    let data = evm.data(evm.pc).to_vec();
+    let data = evm.data(evm.pc);
     let int = if data.is_empty() {
         evm.gas_charge(2)?;
         Int::ZERO

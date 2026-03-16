@@ -319,7 +319,7 @@ impl Evm {
         Ok(ret)
     }
 
-    pub fn data(&self, pc: usize) -> &[u8] {
+    pub fn data(&self, pc: usize) -> Vec<u8> {
         let op = self.code[pc];
         let len = match op {
             0x60..0x80 => op as usize - 0x60 + 1, // PUSH{1..32}
@@ -327,7 +327,10 @@ impl Evm {
         };
         let lo = (pc + 1).min(self.code.len());
         let hi = (pc + 1 + len).min(self.code.len());
-        &self.code[lo..hi]
+        let mut ret = vec![0; len];
+        let len = hi - lo;
+        ret[0..len].copy_from_slice(&self.code[lo..hi]);
+        ret
     }
 
     pub fn step(
@@ -349,7 +352,7 @@ impl Evm {
         let data = if data.is_empty() {
             None
         } else {
-            Some(data.to_vec().into())
+            Some(data.into())
         };
         let gas = self.gas.remaining().max(0) as u64;
         let mut step = Step {
@@ -381,11 +384,18 @@ impl Evm {
                 Ok(match evm_yield {
                     EvmYield::Fetch(fetch) => StepResult::Fetch(fetch),
                     EvmYield::Halt(reason) => {
-                        step1.gas = 0;
-                        step1.stack = 0;
-                        step1.memory = 0;
+                        match reason {
+                            HaltReason::OutOfGas => {
+                                step1.gas = 0;
+                                step1.stack = 0;
+                                step1.memory = 0;
+                            }
+                            _ => {
+                                step1.gas -= self.pending_gas_charge as u64;
+                            }
+                        }
+                        // step1.name = format!("{}_HALT={:?}", step1.name, reason);
                         state.emit(Event::Step(step1));
-                        state.emit(Event::Halt(reason));
                         StepResult::Halt(reason)
                     }
                     EvmYield::Return(ret) => {

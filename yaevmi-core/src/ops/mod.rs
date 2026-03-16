@@ -74,7 +74,8 @@ pub const OPS: [(&str, Handler); 256] = [
     ("SHL", basic::shl),
     ("SHR", basic::shr),
     ("SAR", basic::sar),
-    ("CLZ", basic::clz),
+    // ("CLZ", basic::clz),
+    ("INVALID/0x1E", invalid), // not in Cancun spec
     ("INVALID/0x1F", invalid),
     // 0x20
     ("KECCAK256", basic::hash),
