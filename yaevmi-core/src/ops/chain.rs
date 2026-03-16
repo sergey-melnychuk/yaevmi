@@ -1,4 +1,4 @@
-use yaevmi_base::Acc;
+use yaevmi_base::{Acc, Int};
 
 use crate::{
     Call,
@@ -262,7 +262,10 @@ pub fn basefee(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmRe
 
 pub fn blobhash(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<()> {
     evm.gas_charge(3)?;
-    evm.push(evm.head.blobhash)?;
+    let [_index] = evm.peek()?;
+    // TODO: EIP-4844
+    // tx.blob_versioned_hashes[index] or 0 if out of range.
+    evm.push(Int::ZERO)?;
     Ok(())
 }
 
