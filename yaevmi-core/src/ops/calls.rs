@@ -66,11 +66,7 @@ pub fn call(evm: &mut Evm, ctx: &Context, _: &Call, state: &mut dyn State) -> Ev
     }
 
     // EIP-2929: warm/cold address access
-    let access_cost: i64 = if state.warm_acc(&address) {
-        2600
-    } else {
-        100
-    };
+    let access_cost: i64 = if state.warm_acc(&address) { 2600 } else { 100 };
     evm.gas_charge(access_cost)?;
 
     // Memory expansion for both args and return regions (BEFORE 63/64 rule)
@@ -142,11 +138,7 @@ pub fn callcode(evm: &mut Evm, ctx: &Context, _: &Call, state: &mut dyn State) -
         return Err(EvmYield::Fetch(Fetch::Account(address)));
     };
 
-    let access_cost: i64 = if state.warm_acc(&address) {
-        2600
-    } else {
-        100
-    };
+    let access_cost: i64 = if state.warm_acc(&address) { 2600 } else { 100 };
     evm.gas_charge(access_cost)?;
 
     evm.mem_expand(args_offset, args_size)?;
@@ -210,11 +202,7 @@ pub fn delegatecall(
         return Err(EvmYield::Fetch(Fetch::Account(address)));
     };
 
-    let access_cost: i64 = if state.warm_acc(&address) {
-        2600
-    } else {
-        100
-    };
+    let access_cost: i64 = if state.warm_acc(&address) { 2600 } else { 100 };
     evm.gas_charge(access_cost)?;
 
     evm.mem_expand(args_offset, args_size)?;
@@ -288,11 +276,7 @@ pub fn staticcall(evm: &mut Evm, ctx: &Context, _: &Call, state: &mut dyn State)
     let is_precompile = is_precompile(&address);
 
     // EIP-2929: warm/cold address access (applies to precompiles too)
-    let access_cost: i64 = if state.warm_acc(&address) {
-        2600
-    } else {
-        100
-    };
+    let access_cost: i64 = if state.warm_acc(&address) { 2600 } else { 100 };
     evm.gas_charge(access_cost)?;
 
     evm.mem_expand(args_offset, args_size)?;

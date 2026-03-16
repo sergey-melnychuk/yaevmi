@@ -140,10 +140,7 @@ pub async fn run(
                 .iter()
                 .map(|(addr, slots)| AccessListItem {
                     address: to_addr(addr),
-                    storage_keys: slots
-                        .iter()
-                        .map(to_b256)
-                        .collect::<Vec<B256>>(),
+                    storage_keys: slots.iter().map(to_b256).collect::<Vec<B256>>(),
                 })
                 .collect::<Vec<AccessListItem>>(),
         ))

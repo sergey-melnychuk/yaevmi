@@ -225,7 +225,6 @@ pub fn parse_vec(s: &str) -> Result<Vec<u8>, &'static str> {
     Ok(ret)
 }
 
-
 pub const fn parse<const N: usize>(s: &str) -> [u8; N] {
     let skip = if s.len() >= 2 && s.as_bytes()[0] == b'0' && s.as_bytes()[1] == b'x' {
         2
@@ -362,7 +361,10 @@ mod tests {
         assert_eq!(parse_vec("0xabcd").unwrap(), vec![0xab, 0xcd]);
         assert_eq!(parse_vec("0xff").unwrap(), vec![0xff]);
         assert_eq!(parse_vec("0x1").unwrap(), vec![0x01]);
-        assert_eq!(parse_vec("0xdeadbeef").unwrap(), vec![0xde, 0xad, 0xbe, 0xef]);
+        assert_eq!(
+            parse_vec("0xdeadbeef").unwrap(),
+            vec![0xde, 0xad, 0xbe, 0xef]
+        );
     }
 
     #[test]

@@ -1,5 +1,5 @@
-use std::fmt;
 use crate::hex::parse_vec;
+use std::fmt;
 
 #[derive(Clone, Default, PartialEq, Eq)]
 pub struct Buf(pub Vec<u8>);

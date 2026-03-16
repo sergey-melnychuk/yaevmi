@@ -1,12 +1,12 @@
+mod blake2f;
+mod bn128;
 mod ecrecover;
 mod identity;
-mod sha256;
-mod ripemd160;
-mod modexp;
-mod bn128;
-mod blake2f;
 mod kzg;
+mod modexp;
 mod p256verify;
+mod ripemd160;
+mod sha256;
 
 /// Run a precompile. Returns `(success, output, gas_used)`.
 /// `success=false` means out-of-gas or invalid input; output is empty and gas_used equals gas_limit.

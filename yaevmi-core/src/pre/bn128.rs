@@ -1,4 +1,4 @@
-use bn::{AffineG1, AffineG2, Fq, Fq2, Fr, Group, Gt, G1, G2, pairing};
+use bn::{AffineG1, AffineG2, Fq, Fq2, Fr, G1, G2, Group, Gt, pairing};
 
 /// ecAdd (precompile 0x06) - BN128 point addition
 /// Gas: 150

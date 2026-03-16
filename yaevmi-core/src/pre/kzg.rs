@@ -1,6 +1,6 @@
 use std::sync::LazyLock;
 
-use kzg_rs::{KzgProof, KzgSettings, Bytes32, Bytes48};
+use kzg_rs::{Bytes32, Bytes48, KzgProof, KzgSettings};
 
 static KZG_SETTINGS: LazyLock<KzgSettings> = LazyLock::new(|| {
     KzgSettings::load_trusted_setup_file().expect("failed to load KZG trusted setup")
@@ -59,10 +59,9 @@ pub fn point_evaluation(input: &[u8], gas_limit: i64) -> (bool, Vec<u8>, i64) {
             // FIELD_ELEMENTS_PER_BLOB = 4096 = 0x1000
             out[30] = 0x10;
             // BLS_MODULUS
-            let bls_modulus = hex::decode(
-                "73eda753299d7d483339d80809a1d80553bda402fffe5bfeffffffff00000001",
-            )
-            .unwrap();
+            let bls_modulus =
+                hex::decode("73eda753299d7d483339d80809a1d80553bda402fffe5bfeffffffff00000001")
+                    .unwrap();
             out[32..64].copy_from_slice(&bls_modulus);
             (true, out, GAS)
         }

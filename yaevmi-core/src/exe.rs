@@ -71,6 +71,7 @@ pub fn intrinsic(call: &Call, tx: &Tx, head: &Head, state: &mut impl State) -> (
     for i in 1u64..=0xa {
         state.warm_acc(&Acc::from(i));
     }
+    state.warm_acc(&Acc::from(0x100u64)); // p256verify precompile
 
     // EIP-2930: access list gas (2400/address + 1900/storage key)
     for (acc, keys) in &tx.access_list {
@@ -201,13 +202,25 @@ impl Executor {
 
         let (intrinsic, effective_gas_price) = intrinsic(&self.call, &tx, &head, state);
         if (self.call.gas as i64) < intrinsic {
-            return Err(Error::GasTooLow { have: self.call.gas, want: intrinsic as u64 });
+            return Err(Error::GasTooLow {
+                have: self.call.gas,
+                want: intrinsic as u64,
+            });
         }
         state.inc_nonce(&self.call.by, Int::ONE);
 
         // prepare() takes a checkpoint to be able to revert,
         // so all state mutations must come AFTER that to be included.
-        let mut frame = prepare(tx.clone(), head.clone(), self.call.clone(), mode, None, state, chain).await?;
+        let mut frame = prepare(
+            tx.clone(),
+            head.clone(),
+            self.call.clone(),
+            mode,
+            None,
+            state,
+            chain,
+        )
+        .await?;
         // For top-level CREATE: collision check + initialize with nonce=1 (EIP-161).
         // Done AFTER the checkpoint so it's reverted on init-code failure.
         if let CallMode::Create(created) = mode {
@@ -218,8 +231,13 @@ impl Executor {
                 frame.evm.gas.drain();
                 let gas = frame.evm.gas;
                 state.revert_to(frame.checkpoint);
-                let result = CallResult::Done { status: Int::ZERO, ret: vec![].into(), gas };
-                let gas_final = finalized(&self.call, &tx, &head, effective_gas_price, &result, state);
+                let result = CallResult::Done {
+                    status: Int::ZERO,
+                    ret: vec![].into(),
+                    gas,
+                };
+                let gas_final =
+                    finalized(&self.call, &tx, &head, effective_gas_price, &result, state);
                 let mut result = result;
                 result.gas_mut().finalized = gas_final;
                 state.apply();
@@ -288,7 +306,11 @@ impl Executor {
                         stipend = 0;
                         result = None;
                     }
-                    CallResult::Created { acc: addr, code, gas } => {
+                    CallResult::Created {
+                        acc: addr,
+                        code,
+                        gas,
+                    } => {
                         if !code.0.is_empty() {
                             let hash = Int::from(keccak256(code.as_slice()).as_ref());
                             state.acc_mut(&addr).code = (code, hash);
@@ -374,8 +396,7 @@ impl Executor {
 
                         // Balance check before nonce increment
                         if !call.eth.is_zero() {
-                            let gte =
-                                lift(|[a, b]| if a >= b { U256::ONE } else { U256::ZERO });
+                            let gte = lift(|[a, b]| if a >= b { U256::ONE } else { U256::ZERO });
                             let by0 = state.balance(&creator).unwrap_or_default();
                             if gte([by0, call.eth]).is_zero() {
                                 this.evm.apply(state);
@@ -408,8 +429,7 @@ impl Executor {
 
                         // Collision check: existing nonce or code at derived address
                         let existing_nonce = state.nonce(&created).unwrap_or(Int::ZERO);
-                        let has_code =
-                            state.code(&created).is_some_and(|(c, _)| !c.0.is_empty());
+                        let has_code = state.code(&created).is_some_and(|(c, _)| !c.0.is_empty());
                         if !existing_nonce.is_zero() || has_code {
                             state.revert_to(checkpoint);
                             this.evm.apply(state);
@@ -562,7 +582,11 @@ impl Executor {
         let mut result = result.ok_or(Error::Internal("call result missing".into()))?;
 
         // For top-level CREATE, store the deployed bytecode into the new account.
-        if let CallResult::Created { acc: addr, ref code, .. } = result
+        if let CallResult::Created {
+            acc: addr,
+            ref code,
+            ..
+        } = result
             && !code.0.is_empty()
         {
             let hash = Int::from(keccak256(code.as_slice()).as_ref());
