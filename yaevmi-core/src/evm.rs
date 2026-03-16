@@ -381,7 +381,10 @@ impl Evm {
                 Ok(match evm_yield {
                     EvmYield::Fetch(fetch) => StepResult::Fetch(fetch),
                     EvmYield::Halt(reason) => {
-                        // println!("DEBUG: HALT: {reason:?}");
+                        step1.gas = 0;
+                        step1.stack = 0;
+                        step1.memory = 0;
+                        state.emit(Event::Step(step1));
                         StepResult::Halt(reason)
                     }
                     EvmYield::Return(ret) => {
@@ -403,9 +406,9 @@ impl Evm {
                         StepResult::Revert(ret)
                     }
                     EvmYield::Call(call, mode) => {
-                        let gas = self.gas.remaining().max(0) as u64;
+                        let gas = self.gas_remaining().max(0) as u64;
                         step1.gas = gas;
-                        step1.stack = self.stack.len();
+                        step1.stack = self.stack.len() - self.pending_stack_pops + self.pending_stack_push.len();
                         step1.memory = self.memory.len();
                         state.emit(Event::Step(step1));
                         StepResult::Call(call, mode)

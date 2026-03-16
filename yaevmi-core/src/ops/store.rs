@@ -41,12 +41,12 @@ pub fn sload(evm: &mut Evm, ctx: &Context, _: &Call, state: &mut dyn State) -> E
     evm.gas_charge(100)?;
     let [key] = evm.peek()?;
     let acc = ctx.this;
-    if state.warm_key(&acc, &key) {
-        evm.gas_charge(2000)?;
-    }
     let Some((val, _)) = state.get(&acc, &key) else {
         return Err(EvmYield::Fetch(crate::evm::Fetch::StateCell(acc, key)));
     };
+    if state.warm_key(&acc, &key) {
+        evm.gas_charge(2000)?;
+    }
     evm.push(val)?;
     Ok(())
 }

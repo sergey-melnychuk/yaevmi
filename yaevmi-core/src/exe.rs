@@ -53,7 +53,7 @@ pub struct CallFrame {
     pub checkpoint: usize,
 }
 
-pub fn intrinsic(call: &Call, tx: &Tx, head: &Head, state: &mut impl State) -> (i64, Int) {
+pub fn intrinsic(call: &Call, tx: &Tx, head: &Head, state: &mut impl State) -> Result<(i64, Int)> {
     let mut total = 21_000i64;
     if call.is_create() {
         total += 32_000;
@@ -98,16 +98,19 @@ pub fn intrinsic(call: &Call, tx: &Tx, head: &Head, state: &mut impl State) -> (
     // Upfront gas deduction (YP §6.1): sender pays gas_limit × effective_gas_price.
     let mul = lift(|[a, b]| a * b);
     let sub = lift(|[a, b]| a - b);
+    let add = lift(|[a, b]| a + b);
+    let gt = lift(|[a, b]| if a > b { U256::ONE } else { U256::ZERO });
     let upfront = mul([Int::from(call.gas), effective_gas_price]);
+    let total_cost = add([upfront, call.eth]);
     let balance = state.balance(&call.by).unwrap_or_default();
-    if upfront > balance {
-        // TODO: return error
+    if !gt([total_cost, balance]).is_zero() {
+        return Err(Error::InsufficientFunds);
     }
     state.set_value(&call.by, sub([balance, upfront]));
 
     // EIP-7702: authorization list gas (25000/auth tuple)
     total += 25_000 * tx.authorization_list.len() as i64;
-    (total, effective_gas_price)
+    Ok((total, effective_gas_price))
 }
 
 pub fn finalized(
@@ -192,6 +195,31 @@ impl Executor {
             return Err(Error::Internal("inconsistent state detected".into()));
         }
 
+        // Pre-transaction validation checks
+
+        // EIP-1559: max_fee_per_gas must cover base_fee
+        if !tx.max_fee_per_gas.is_zero() && tx.max_fee_per_gas < head.base_fee {
+            return Err(Error::MaxFeeLessThanBaseFee);
+        }
+
+        // EIP-1559: max_priority_fee must not exceed max_fee
+        if !tx.max_fee_per_gas.is_zero() && tx.max_priority_fee_per_gas > tx.max_fee_per_gas {
+            return Err(Error::PriorityGreaterThanMaxFee);
+        }
+
+        // Gas limit must not exceed block gas limit
+        let gt = lift(|[a, b]| if a > b { U256::ONE } else { U256::ZERO });
+        if !gt([Int::from(self.call.gas), head.gas_limit]).is_zero() {
+            return Err(Error::GasAllowanceExceeded);
+        }
+
+        // EIP-3607: sender must be an EOA (no code)
+        if let Some(acc) = state.acc(&self.call.by) {
+            if !acc.code.0 .0.is_empty() {
+                return Err(Error::SenderNotEOA);
+            }
+        }
+
         let mode = if self.call.is_create() {
             let nonce = state.nonce(&self.call.by).unwrap_or_default();
             let created = create_address(&self.call.by, nonce.as_u64());
@@ -200,7 +228,7 @@ impl Executor {
             CallMode::Call(0, 0)
         };
 
-        let (intrinsic, effective_gas_price) = intrinsic(&self.call, &tx, &head, state);
+        let (intrinsic, effective_gas_price) = intrinsic(&self.call, &tx, &head, state)?;
         if (self.call.gas as i64) < intrinsic {
             return Err(Error::GasTooLow {
                 have: self.call.gas,
@@ -385,6 +413,8 @@ impl Executor {
 
                         // Depth check before nonce increment
                         if this.ctx.depth + 1 > MAX_CALL_DEPTH {
+                            // Return child gas (not consumed on depth failure)
+                            this.evm.gas.spent -= call.gas as i64;
                             this.evm.apply(state);
                             let _ = this.evm.push(Int::ZERO);
                             this.evm.apply(state);
@@ -399,6 +429,8 @@ impl Executor {
                             let gte = lift(|[a, b]| if a >= b { U256::ONE } else { U256::ZERO });
                             let by0 = state.balance(&creator).unwrap_or_default();
                             if gte([by0, call.eth]).is_zero() {
+                                // Return child gas (not consumed on balance failure)
+                                this.evm.gas.spent -= call.gas as i64;
                                 this.evm.apply(state);
                                 let _ = this.evm.push(Int::ZERO);
                                 this.evm.apply(state);
@@ -480,6 +512,8 @@ impl Executor {
                     .await?;
                     if frame.ctx.depth > MAX_CALL_DEPTH {
                         state.revert_to(checkpoint);
+                        // Return child gas (not consumed on depth failure)
+                        this.evm.gas.spent -= call.gas as i64;
                         this.evm.apply(state);
                         let _ = this.evm.push(Int::ZERO);
                         this.evm.apply(state);
@@ -500,6 +534,8 @@ impl Executor {
                         let gte = lift(|[a, b]| if a >= b { U256::ONE } else { U256::ZERO });
                         if gte([by0, call.eth]).is_zero() {
                             state.revert_to(checkpoint);
+                            // Return child gas (not consumed on balance failure)
+                            this.evm.gas.spent -= call.gas as i64;
                             this.evm.apply(state);
                             let _ = this.evm.push(Int::ZERO);
                             this.evm.apply(state);
@@ -604,7 +640,7 @@ impl Executor {
 async fn prepare(
     tx: Tx,
     head: Head,
-    call: Call,
+    mut call: Call,
     mode: CallMode,
     ctx: Option<&Context>,
     state: &mut impl State,
@@ -612,7 +648,10 @@ async fn prepare(
 ) -> Result<CallFrame> {
     let is_create = call.is_create();
     let code = if is_create {
-        call.data.clone()
+        let code = call.data.clone();
+        // EVM spec: init code runs with empty input data
+        call.data = Buf::default();
+        code
     } else if let Some((code, _)) = state.code(&call.to) {
         code
     } else if let Ok((code, hash)) = chain.code(&call.to).await {

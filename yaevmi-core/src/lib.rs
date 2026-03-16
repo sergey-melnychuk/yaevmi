@@ -23,6 +23,16 @@ pub mod trace;
 pub enum Error {
     #[error("Gas too low: have {have} but want {want}")]
     GasTooLow { have: u64, want: u64 },
+    #[error("Insufficient account funds")]
+    InsufficientFunds,
+    #[error("Sender is not an EOA")]
+    SenderNotEOA,
+    #[error("Max fee per gas less than base fee")]
+    MaxFeeLessThanBaseFee,
+    #[error("Priority fee greater than max fee")]
+    PriorityGreaterThanMaxFee,
+    #[error("Gas limit exceeds block gas limit")]
+    GasAllowanceExceeded,
     #[error("Generic error: {0}")]
     Generic(#[from] eyre::Report),
     #[error("Internal error: {0}")]

@@ -148,17 +148,31 @@ pub async fn run_entry(tc: &TestCase, entry: &PostEntry) -> eyre::Result<()> {
     let (call, tx) = build_call_tx(tc, &entry.indexes);
     let env = build_env(tc);
 
-    let result = if std::env::var("REVM").is_ok() {
-        crate::revm::run(call.clone(), head.clone(), env.clone(), tx.clone()).await
-    } else {
-        crate::sol::run(call.clone(), head.clone(), env.clone(), tx.clone()).await
-    };
+    let yevm = crate::sol::run(call.clone(), head.clone(), env.clone(), tx.clone()).await;
+    let revm = crate::revm::run(call.clone(), head.clone(), env.clone(), tx.clone()).await;
+
+    if std::env::var("STEPS").is_ok() {
+        let mut steps = Vec::new();
+        if let Some((yevm, revm)) = yevm.as_ref().ok().zip(revm.as_ref().ok()) {
+            let y_steps = &yevm.3;
+            let r_steps = &revm.3;
+            let mut skip = 0;
+            for (y, r) in y_steps.iter().zip(r_steps.iter()) {
+                if y != r {
+                    let steps = steps.iter().rev().map(|s| format!("{s:#?}")).collect::<Vec<_>>().join("\n");
+                    eyre::ensure!(false, "STEP\nskip={skip}\nY={y:#?}\nR={r:#?}\nPREV:\n{steps}");
+                }
+                steps.push(r.clone());
+                skip += 1;
+            }
+        }
+    }
 
     let (_, _, _, _, snapshot) = if let Some(expect) = entry.expect_exception.as_ref() {
-        eyre::ensure!(result.is_err(), "expected exception '{expect}'");
+        eyre::ensure!(yevm.is_err(), "expected exception '{expect}'");
         return Ok(());
     } else {
-        match result {
+        match yevm {
             Ok(result) => result,
             Err(e) => {
                 // skip this annoying failing test (call to 0x != create, makes no sense, ffs)
