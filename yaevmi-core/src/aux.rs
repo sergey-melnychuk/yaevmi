@@ -2,7 +2,9 @@ use yaevmi_base::{Acc, Int};
 use yaevmi_misc::keccak256;
 
 pub fn is_precompile(addr: &Acc) -> bool {
-    addr.as_ref()[..12].iter().all(|&b| b == 0) && (1u64..=9).contains(&addr.as_u64())
+    let id = addr.as_u64();
+    addr.as_ref()[..12].iter().all(|&b| b == 0)
+        && ((1u64..=0xa).contains(&id) || id == 0x100)
 }
 
 /// CREATE address: keccak256(rlp([sender, nonce]))[12:]

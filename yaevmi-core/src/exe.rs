@@ -64,10 +64,13 @@ pub fn intrinsic(call: &Call, tx: &Tx, head: &Head, state: &mut impl State) -> (
     let non_zeroes = call.data.0.len() - zeroes;
     total += (zeroes * 4 + non_zeroes * 16) as i64;
 
-    // EIP-2929: pre-warm sender, target, and coinbase
+    // EIP-2929: pre-warm sender, target, coinbase, and precompile addresses
     state.warm_acc(&call.by);
     state.warm_acc(&call.to);
     state.warm_acc(&head.coinbase.to());
+    for i in 1u64..=0xa {
+        state.warm_acc(&Acc::from(i));
+    }
 
     // EIP-2930: access list gas (2400/address + 1900/storage key)
     for (acc, keys) in &tx.access_list {

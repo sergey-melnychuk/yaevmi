@@ -14,6 +14,14 @@ hex.workspace = true
 yaevmi-base.workspace = true
 yaevmi-misc.workspace = true
 k256.workspace = true
+sha2 = "0.10"
+ripemd = "0.1"
+num-bigint = "0.4"
+num-traits = "0.2"
+num-integer = "0.1"
+bn = { package = "substrate-bn", version = "0.6" }
+kzg-rs = "0.2"
+p256 = { version = "0.13", features = ["ecdsa"] }
 
 ## Allow `EvmYield` as result error despite the size
 ## TODO: consider `Call(Call, CallMode),` => `Call(Box<Call>, CallMode),`
