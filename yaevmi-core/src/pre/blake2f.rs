@@ -2,6 +2,7 @@
 /// Input: rounds (4 bytes) || h (64 bytes) || m (128 bytes) || t (16 bytes) || f (1 byte)
 /// = 213 bytes total
 /// Gas: rounds (the 4-byte big-endian uint)
+#[allow(clippy::needless_range_loop)]
 pub fn blake2f(input: &[u8], gas_limit: i64) -> (bool, Vec<u8>, i64) {
     if input.len() != 213 {
         return (false, vec![], gas_limit);

@@ -178,12 +178,7 @@ impl<'de, const N: usize> serde::Deserialize<'de> for Hex<N> {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         let s = String::deserialize(d)?;
         let hex = s.strip_prefix("0x").unwrap_or(&s);
-        let ok = hex.as_bytes().iter().all(|&c| match c {
-            b'0'..=b'9' => true,
-            b'a'..=b'f' => true,
-            b'A'..=b'F' => true,
-            _ => false,
-        });
+        let ok = hex.as_bytes().iter().all(|&c| c.is_ascii_hexdigit());
         if !ok {
             return Err(serde::de::Error::custom("hex literal invalid"));
         }

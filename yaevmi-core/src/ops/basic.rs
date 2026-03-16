@@ -144,7 +144,7 @@ pub fn exp(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult
         use yaevmi_base::math::U256;
         let b_u = U256::from_be_slice(b.as_ref());
         let bit_len = 256 - b_u.leading_zeros();
-        10 + 50 * ((bit_len + 7) / 8) as i64
+        10 + 50 * bit_len.div_ceil(8) as i64
     };
     evm.gas_charge(exp_cost)?;
     let f = lift(|[a, b]| a.pow(b));

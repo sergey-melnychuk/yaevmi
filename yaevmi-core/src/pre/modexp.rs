@@ -82,7 +82,7 @@ fn read_u64(data: &[u8]) -> u64 {
 fn modexp_gas(b_size: usize, e_size: usize, m_size: usize, input: &[u8]) -> i64 {
     // EIP-2565 gas calculation
     let max_len = b_size.max(m_size) as u64;
-    let words = (max_len + 7) / 8;
+    let words = max_len.div_ceil(8);
     let multiplication_complexity = words * words;
 
     let iteration_count = calc_iteration_count(e_size, input);

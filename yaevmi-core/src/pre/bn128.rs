@@ -48,7 +48,7 @@ pub fn ec_mul(input: &[u8], gas_limit: i64) -> (bool, Vec<u8>, i64) {
 /// ecPairing (precompile 0x08) - BN128 pairing check
 /// Gas: 45000 + 34000 * num_pairs
 pub fn ec_pairing(input: &[u8], gas_limit: i64) -> (bool, Vec<u8>, i64) {
-    if input.len() % 192 != 0 {
+    if !input.len().is_multiple_of(192) {
         return (false, vec![], gas_limit);
     }
     let num_pairs = input.len() / 192;
@@ -119,12 +119,9 @@ fn encode_point(p: G1) -> Vec<u8> {
     if p.is_zero() {
         return out;
     }
-    match AffineG1::from_jacobian(p) {
-        Some(affine) => {
-            affine.x().to_big_endian(&mut out[0..32]).unwrap();
-            affine.y().to_big_endian(&mut out[32..64]).unwrap();
-        }
-        None => {} // point at infinity -> zeros
+    if let Some(affine) = AffineG1::from_jacobian(p) {
+        affine.x().to_big_endian(&mut out[0..32]).unwrap();
+        affine.y().to_big_endian(&mut out[32..64]).unwrap();
     }
     out
 }
