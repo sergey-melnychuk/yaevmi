@@ -40,7 +40,7 @@ pub enum Event {
     Full(Step, Vec<Int>, Buf),
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Step {
     pub pc: usize,
     pub op: u8,
@@ -51,6 +51,18 @@ pub struct Step {
     pub gas: u64,
     pub stack: usize,
     pub memory: usize,
+}
+
+impl PartialEq for Step {
+    fn eq(&self, other: &Self) -> bool {
+        self.pc == other.pc 
+            && self.op == other.op 
+            && self.name == other.name 
+            && self.data == other.data 
+            && self.gas == other.gas 
+            && self.stack == other.stack 
+            && self.memory == other.memory
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]

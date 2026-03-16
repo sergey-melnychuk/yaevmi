@@ -383,6 +383,21 @@ impl Executor {
                     if is_precompile(&call.to) {
                         // EIP-211: clear return data before new call
                         this.evm.ret.clear();
+
+                        // Value transfer for precompile CALL
+                        if !call.eth.is_zero()
+                            && matches!(mode, CallMode::Call(..) | CallMode::CallCode(..))
+                        {
+                            if matches!(mode, CallMode::Call(..)) {
+                                let sub = lift(|[a, b]| a - b);
+                                let add = lift(|[a, b]| a + b);
+                                let by0 = state.balance(&call.by).unwrap_or_default();
+                                let to0 = state.balance(&call.to).unwrap_or_default();
+                                state.set_value(&call.by, sub([by0, call.eth]));
+                                state.set_value(&call.to, add([to0, call.eth]));
+                            }
+                        }
+
                         // Precompile runs inline. Replace child-gas reservation with actual used
                         // (avoids OOG when child_gas > remaining); keep access cost.
                         let (ok, out, gas_used) =

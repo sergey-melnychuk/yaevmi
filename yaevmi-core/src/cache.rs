@@ -384,6 +384,7 @@ impl State for Cache {
                 Event::Put(Target::Code { acc, hash }, _) => Some(Revert::Code(*acc, *hash)),
                 Event::WarmAcc(acc) => Some(Revert::WarmAcc(*acc)),
                 Event::WarmKey(acc, key) => Some(Revert::WarmKey(*acc, *key)),
+                // TODO: revert CREATE{,2} & SELFDESTRUCT as well?
                 _ => None,
             })
             .collect();

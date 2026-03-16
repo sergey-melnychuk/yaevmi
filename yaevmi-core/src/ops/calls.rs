@@ -65,8 +65,9 @@ pub fn call(evm: &mut Evm, ctx: &Context, _: &Call, state: &mut dyn State) -> Ev
         return Err(EvmYield::Fetch(Fetch::Account(ctx.this)));
     }
 
-    // EIP-2929: warm/cold address access
-    let access_cost: i64 = if state.warm_acc(&address) { 2600 } else { 100 };
+    // EIP-2929: warm/cold address access (use pending warm to survive Fetch+reset)
+    let access_cost: i64 = if state.is_cold_acc(&address) { 2600 } else { 100 };
+    evm.warm_acc(&address);
     evm.gas_charge(access_cost)?;
 
     // Memory expansion for both args and return regions (BEFORE 63/64 rule)
@@ -83,17 +84,20 @@ pub fn call(evm: &mut Evm, ctx: &Context, _: &Call, state: &mut dyn State) -> Ev
     }
 
     // New account cost (sending value to dead account per EIP-161).
-    // Must load callee before charging: if not in state, fetch to determine emptiness.
-    if state.acc(&address).is_none() {
-        return Err(EvmYield::Fetch(Fetch::Account(address)));
-    }
-    let is_empty = state
-        .acc(&address)
-        .map(|a| a.value.is_zero() && a.nonce.is_zero() && a.code.0.0.is_empty())
-        .unwrap_or(true);
-    // EIP-161: only charge when BOTH value>0 AND account is dead (empty).
-    if has_value && is_empty {
-        evm.gas_charge(25000)?;
+    // Precompile addresses are always considered "existing" — no new-account cost.
+    if !is_precompile(&address) {
+        // Must load callee before charging: if not in state, fetch to determine emptiness.
+        if state.acc(&address).is_none() {
+            return Err(EvmYield::Fetch(Fetch::Account(address)));
+        }
+        let is_empty = state
+            .acc(&address)
+            .map(|a| a.value.is_zero() && a.nonce.is_zero() && a.code.0.0.is_empty())
+            .unwrap_or(true);
+        // EIP-161: only charge when BOTH value>0 AND account is dead (empty).
+        if has_value && is_empty {
+            evm.gas_charge(25000)?;
+        }
     }
 
     // 63/64 rule: cap the gas arg at available_gas * 63/64
@@ -138,7 +142,8 @@ pub fn callcode(evm: &mut Evm, ctx: &Context, _: &Call, state: &mut dyn State) -
         return Err(EvmYield::Fetch(Fetch::Account(address)));
     };
 
-    let access_cost: i64 = if state.warm_acc(&address) { 2600 } else { 100 };
+    let access_cost: i64 = if state.is_cold_acc(&address) { 2600 } else { 100 };
+    evm.warm_acc(&address);
     evm.gas_charge(access_cost)?;
 
     evm.mem_expand(args_offset, args_size)?;
@@ -202,7 +207,8 @@ pub fn delegatecall(
         return Err(EvmYield::Fetch(Fetch::Account(address)));
     };
 
-    let access_cost: i64 = if state.warm_acc(&address) { 2600 } else { 100 };
+    let access_cost: i64 = if state.is_cold_acc(&address) { 2600 } else { 100 };
+    evm.warm_acc(&address);
     evm.gas_charge(access_cost)?;
 
     evm.mem_expand(args_offset, args_size)?;
@@ -276,7 +282,8 @@ pub fn staticcall(evm: &mut Evm, ctx: &Context, _: &Call, state: &mut dyn State)
     let is_precompile = is_precompile(&address);
 
     // EIP-2929: warm/cold address access (applies to precompiles too)
-    let access_cost: i64 = if state.warm_acc(&address) { 2600 } else { 100 };
+    let access_cost: i64 = if state.is_cold_acc(&address) { 2600 } else { 100 };
+    evm.warm_acc(&address);
     evm.gas_charge(access_cost)?;
 
     evm.mem_expand(args_offset, args_size)?;
@@ -328,11 +335,12 @@ pub fn selfdestruct(
     let beneficiary: Acc = beneficiary.to();
 
     // EIP-2929: warm/cold address access for beneficiary
-    let access_cost: i64 = if state.warm_acc(&beneficiary) {
+    let access_cost: i64 = if state.is_cold_acc(&beneficiary) {
         2600
     } else {
         100
     };
+    evm.warm_acc(&beneficiary);
     evm.gas_charge(access_cost)?;
 
     let balance = state.balance(&ctx.this).unwrap_or(Int::ZERO);

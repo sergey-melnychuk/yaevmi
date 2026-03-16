@@ -5,7 +5,7 @@ use crate::{Acc, Call, Int, Result, ops::OPS, state::State};
 
 const K: usize = 1024;
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub enum HaltReason {
     OutOfGas,
     OutOfMemory,
@@ -385,6 +385,7 @@ impl Evm {
                         step1.stack = 0;
                         step1.memory = 0;
                         state.emit(Event::Step(step1));
+                        state.emit(Event::Halt(reason));
                         StepResult::Halt(reason)
                     }
                     EvmYield::Return(ret) => {
