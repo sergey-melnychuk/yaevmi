@@ -74,9 +74,9 @@ pub fn call(evm: &mut Evm, ctx: &Context, _: &Call, state: &mut dyn State) -> Ev
     };
     evm.gas_charge(access_cost)?;
 
-    // Memory expansion for both args and return regions
-    evm::mem_check(args_offset, args_size)?;
-    evm::mem_check(ret_offset, ret_size)?;
+    // Memory expansion for both args and return regions (BEFORE 63/64 rule)
+    evm.mem_expand(args_offset, args_size)?;
+    evm.mem_expand(ret_offset, ret_size)?;
 
     // Value transfer cost
     let has_value = !value.is_zero();
@@ -146,8 +146,8 @@ pub fn callcode(evm: &mut Evm, ctx: &Context, _: &Call, state: &mut dyn State) -
     };
     evm.gas_charge(access_cost)?;
 
-    evm::mem_check(args_offset, args_size)?;
-    evm::mem_check(ret_offset, ret_size)?;
+    evm.mem_expand(args_offset, args_size)?;
+    evm.mem_expand(ret_offset, ret_size)?;
 
     let has_value = !value.is_zero();
     if has_value {
@@ -215,8 +215,8 @@ pub fn delegatecall(
     };
     evm.gas_charge(access_cost)?;
 
-    evm::mem_check(args_offset, args_size)?;
-    evm::mem_check(ret_offset, ret_size)?;
+    evm.mem_expand(args_offset, args_size)?;
+    evm.mem_expand(ret_offset, ret_size)?;
 
     let available = evm.gas_remaining().max(0) as u64;
     let max_child = available - available / 64;
@@ -293,20 +293,12 @@ pub fn staticcall(evm: &mut Evm, ctx: &Context, _: &Call, state: &mut dyn State)
     };
     evm.gas_charge(access_cost)?;
 
-    evm::mem_check(args_offset, args_size)?;
-    evm::mem_check(ret_offset, ret_size)?;
+    evm.mem_expand(args_offset, args_size)?;
+    evm.mem_expand(ret_offset, ret_size)?;
 
     let available = evm.gas_remaining().max(0) as u64;
     let max_child = available - available / 64;
-
-    // TOOD:NOW!
     let gas = gas_arg.as_u64().min(max_child);
-    // let gas = if is_precompile {
-    //     // Precompiles run inline; cap charge to avoid OOG (ecrecover=3k, others ≤100k)
-    //     gas_arg.as_u64().min(max_child).min(100_000)
-    // } else {
-    //     gas_arg.as_u64().min(max_child)
-    // };
 
     if !is_precompile && state.acc(&address).is_none() {
         return Err(EvmYield::Fetch(Fetch::Account(address)));

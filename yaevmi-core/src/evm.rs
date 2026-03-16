@@ -282,7 +282,7 @@ impl Evm {
         Ok(())
     }
 
-    fn mem_expand(&mut self, offset: usize, size: usize) -> EvmResult<()> {
+    pub fn mem_expand(&mut self, offset: usize, size: usize) -> EvmResult<()> {
         mem_check(offset, size)?;
         let len = self.memory.len();
         let end = (offset + size).div_ceil(32) * 32;
