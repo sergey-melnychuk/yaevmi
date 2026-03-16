@@ -1,4 +1,4 @@
-use yaevmi_base::{Acc, Int};
+use yaevmi_base::Acc;
 
 use crate::{
     Call,
@@ -108,8 +108,7 @@ pub fn codecopy(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmR
 
 pub fn gasprice(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<()> {
     evm.gas_charge(2)?;
-    // evm.push(evm.head.gas_price)?; // TODO
-    evm.push(Int::ZERO)?;
+    evm.push(evm.gas_price)?;
     Ok(())
 }
 

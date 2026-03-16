@@ -119,11 +119,6 @@ impl Gas {
         self.spent = self.limit;
         self.refund = 0;
     }
-
-    pub fn finalize(&mut self) -> i64 {
-        // TODO: final gas calculations
-        self.finalized
-    }
 }
 
 pub struct Context {
@@ -153,6 +148,7 @@ pub struct Evm {
     pub head: Head,
     pub ret: Vec<u8>,
 
+    pub gas_price: Int,
     pub(crate) pending_stack_pops: usize,
     pub(crate) pending_stack_push: Vec<Int>,
     pub(crate) pending_gas_charge: i64,
@@ -166,7 +162,7 @@ impl Evm {
     pub const STACK_SIZE_LIMIT: usize = 1024;
     pub const MEMORY_SIZE_LIMIT: usize = 4 * K * K;
 
-    pub fn new(head: Head, code: Vec<u8>, gas: u64) -> Self {
+    pub fn new(head: Head, code: Vec<u8>, gas: u64, gas_price: Int) -> Self {
         Self {
             pc: 0,
             gas: Gas::new(gas),
@@ -175,6 +171,7 @@ impl Evm {
             code,
             head,
             ret: Vec::new(),
+            gas_price,
             pending_stack_pops: 0,
             pending_stack_push: Vec::new(),
             pending_gas_charge: 0,

@@ -299,6 +299,7 @@ async fn test_general_state_cancun() -> eyre::Result<()> {
                     for result in run_case(&tc, FORK).await {
                         total += 1;
                         if let Err(e) = result {
+                            let name = name.strip_prefix("GeneralStateTests").unwrap_or(&name);
                             failed.push(format!("FAIL: {name}: {e}"));
                         }
                     }
@@ -309,7 +310,9 @@ async fn test_general_state_cancun() -> eyre::Result<()> {
                     passes.load(Ordering::Relaxed)
                 };
                 let count = counter.fetch_add(1, Ordering::Relaxed);
-                println!("DEBUG: Done ({passes} | {count}): {file_path:?}: {total}");
+                let path = file_path.to_str().map(|s| s.to_owned()).unwrap_or_default();
+                let name = path.strip_prefix(root).unwrap_or(&path);
+                println!("DEBUG: Done ({passes} | {count}): {name:?}: {total}");
                 (total, failed)
             });
             handles.push(handle);

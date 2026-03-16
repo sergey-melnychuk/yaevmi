@@ -195,8 +195,34 @@ impl Executor {
         state.inc_nonce(&self.call.by, Int::ONE);
 
         // prepare() takes a checkpoint to be able to revert,
-        // so transfer() must come AFTER that to be included
-        let mut frame = prepare(head.clone(), self.call.clone(), mode, None, state, chain).await?;
+        // so all state mutations must come AFTER that to be included.
+        let mut frame = prepare(tx.clone(), head.clone(), self.call.clone(), mode, None, state, chain).await?;
+        // For top-level CREATE: collision check + initialize with nonce=1 (EIP-161).
+        // Done AFTER the checkpoint so it's reverted on init-code failure.
+        if let CallMode::Create(created) = mode {
+            let existing_nonce = state.nonce(&created).unwrap_or(Int::ZERO);
+            let has_code = state.code(&created).is_some_and(|(c, _)| !c.0.is_empty());
+            if !existing_nonce.is_zero() || has_code {
+                // Collision: drain gas, revert, return failure
+                frame.evm.gas.drain();
+                let gas = frame.evm.gas;
+                state.revert_to(frame.checkpoint);
+                let result = CallResult::Done { status: Int::ZERO, ret: vec![].into(), gas };
+                let gas_final = finalized(&self.call, &tx, &head, effective_gas_price, &result, state);
+                let mut result = result;
+                result.gas_mut().finalized = gas_final;
+                state.apply();
+                return Ok(result);
+            }
+            state.create(
+                created,
+                Account {
+                    value: Int::ZERO,
+                    nonce: Int::ONE,
+                    code: (Buf::default(), Int::ZERO),
+                },
+            );
+        }
         transfer(&self.call, &mode, state);
         let _ = frame.evm.gas_charge(intrinsic);
         self.callstack.push(frame);
@@ -302,6 +328,46 @@ impl Executor {
                         continue;
                     }
 
+                    let is_create = matches!(mode, CallMode::Create(_) | CallMode::Create2(_));
+
+                    // For CREATE: perform pre-checkpoint checks, then increment nonce.
+                    // Per EVM spec, nonce is incremented before the snapshot so it survives
+                    // collision reverts, but NOT depth or insufficient-balance failures.
+                    if let Some(created) = mode.created() {
+                        let creator = call.by;
+
+                        // Depth check before nonce increment
+                        if this.ctx.depth + 1 > MAX_CALL_DEPTH {
+                            this.evm.apply(state);
+                            let _ = this.evm.push(Int::ZERO);
+                            this.evm.apply(state);
+                            this.evm.ret = vec![];
+                            this.evm.pc += 1;
+                            target = (0, 0);
+                            continue;
+                        }
+
+                        // Balance check before nonce increment
+                        if !call.eth.is_zero() {
+                            let gte =
+                                lift(|[a, b]| if a >= b { U256::ONE } else { U256::ZERO });
+                            let by0 = state.balance(&creator).unwrap_or_default();
+                            if gte([by0, call.eth]).is_zero() {
+                                this.evm.apply(state);
+                                let _ = this.evm.push(Int::ZERO);
+                                this.evm.apply(state);
+                                this.evm.ret = vec![];
+                                this.evm.pc += 1;
+                                target = (0, 0);
+                                continue;
+                            }
+                        }
+
+                        // Increment nonce BEFORE checkpoint so collision-reverts don't undo it
+                        state.inc_nonce(&creator, Int::ONE);
+                        let _ = created; // suppress unused warning
+                    }
+
                     let checkpoint = state.checkpoint(this.ctx.depth);
                     target = mode.target().unwrap_or_default();
                     stipend = if !call.eth.is_zero()
@@ -312,21 +378,20 @@ impl Executor {
                         0
                     };
 
-                    let is_create = matches!(mode, CallMode::Create(_) | CallMode::Create2(_));
-
                     if let Some(created) = mode.created() {
                         let creator = call.by;
 
-                        // Increment creator's nonce
-                        state.inc_nonce(&creator, Int::ONE);
-
                         // Collision check: existing nonce or code at derived address
                         let existing_nonce = state.nonce(&created).unwrap_or(Int::ZERO);
-                        let has_code = state.code(&created).is_some_and(|(c, _)| !c.0.is_empty());
+                        let has_code =
+                            state.code(&created).is_some_and(|(c, _)| !c.0.is_empty());
                         if !existing_nonce.is_zero() || has_code {
                             state.revert_to(checkpoint);
+                            this.evm.apply(state);
                             let _ = this.evm.push(Int::ZERO);
+                            this.evm.apply(state);
                             this.evm.ret = vec![];
+                            this.evm.pc += 1;
                             target = (0, 0);
                             continue;
                         }
@@ -341,19 +406,11 @@ impl Executor {
                             },
                         );
 
-                        // Value transfer from creator to new account
+                        // Value transfer (balance already verified above)
                         if !call.eth.is_zero() {
-                            let gte = lift(|[a, b]| if a >= b { U256::ONE } else { U256::ZERO });
-                            let by0 = state.balance(&creator).unwrap_or_default();
-                            if gte([by0, call.eth]).is_zero() {
-                                state.revert_to(checkpoint);
-                                let _ = this.evm.push(Int::ZERO);
-                                this.evm.ret = vec![];
-                                target = (0, 0);
-                                continue;
-                            }
                             let sub = lift(|[a, b]| a - b);
                             let add = lift(|[a, b]| a + b);
+                            let by0 = state.balance(&creator).unwrap_or_default();
                             state.set_value(&creator, sub([by0, call.eth]));
                             let to0 = state.balance(&created).unwrap_or_default();
                             state.set_value(&created, add([to0, call.eth]));
@@ -361,6 +418,7 @@ impl Executor {
                     }
 
                     let frame = prepare(
+                        tx.clone(),
                         head.clone(),
                         call.clone(),
                         mode,
@@ -371,8 +429,11 @@ impl Executor {
                     .await?;
                     if frame.ctx.depth > MAX_CALL_DEPTH {
                         state.revert_to(checkpoint);
+                        this.evm.apply(state);
                         let _ = this.evm.push(Int::ZERO);
+                        this.evm.apply(state);
                         this.evm.ret = vec![];
+                        this.evm.pc += 1;
                         target = (0, 0);
                         continue;
                     }
@@ -389,8 +450,11 @@ impl Executor {
                         let gte = lift(|[a, b]| if a >= b { U256::ONE } else { U256::ZERO });
                         if gte([by0, call.eth]).is_zero() {
                             state.revert_to(checkpoint);
+                            this.evm.apply(state);
                             let _ = this.evm.push(Int::ZERO);
+                            this.evm.apply(state);
                             this.evm.ret = vec![];
+                            this.evm.pc += 1;
                             target = (0, 0);
                             continue;
                         }
@@ -478,6 +542,7 @@ impl Executor {
 }
 
 async fn prepare(
+    tx: Tx,
     head: Head,
     call: Call,
     mode: CallMode,
@@ -496,7 +561,7 @@ async fn prepare(
     } else {
         Buf::default()
     };
-    let evm = Evm::new(head, code.into_vec(), call.gas);
+    let evm = Evm::new(head, code.into_vec(), call.gas, tx.gas_price);
     let is_static = matches!(mode, CallMode::Static(_, _));
     let this = match mode {
         CallMode::Create(acc) => acc,
