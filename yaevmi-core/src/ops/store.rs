@@ -177,8 +177,7 @@ pub fn jumpi(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResu
 
 pub fn pc(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<()> {
     evm.gas_charge(2)?;
-    let pc = evm.pc + 1;
-    evm.push(pc.into())?;
+    evm.push(evm.pc.into())?;
     Ok(())
 }
 

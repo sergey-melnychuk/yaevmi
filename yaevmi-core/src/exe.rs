@@ -154,7 +154,10 @@ pub fn transfer(call: &Call, mode: &CallMode, state: &mut impl State) {
         let to0 = state.balance(&created).unwrap_or_default();
         state.set_value(&created, add([to0, call.eth]));
     } else {
+        let sub = lift(|[a, b]| a - b);
         let add = lift(|[a, b]| a + b);
+        let by0 = state.balance(&call.by).unwrap_or_default();
+        state.set_value(&call.by, sub([by0, call.eth]));
         let to = state.auth(&call.to).unwrap_or(call.to);
         let to0 = state.balance(&to).unwrap_or_default();
         state.set_value(&to, add([to0, call.eth]));
