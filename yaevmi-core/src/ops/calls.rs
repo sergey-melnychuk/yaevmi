@@ -66,8 +66,7 @@ pub fn call(evm: &mut Evm, ctx: &Context, _: &Call, state: &mut dyn State) -> Ev
     };
 
     // EIP-2929: warm/cold address access
-    let access_cost: i64 = if state.is_cold_acc(&address) {
-        evm.warm_acc(&address);
+    let access_cost: i64 = if state.warm_acc(&address) {
         2600
     } else {
         100
@@ -138,8 +137,7 @@ pub fn callcode(evm: &mut Evm, ctx: &Context, _: &Call, state: &mut dyn State) -
         return Err(EvmYield::Fetch(Fetch::Account(address)));
     };
 
-    let access_cost: i64 = if state.is_cold_acc(&address) {
-        evm.warm_acc(&address);
+    let access_cost: i64 = if state.warm_acc(&address) {
         2600
     } else {
         100
@@ -207,8 +205,7 @@ pub fn delegatecall(
         return Err(EvmYield::Fetch(Fetch::Account(address)));
     };
 
-    let access_cost: i64 = if state.is_cold_acc(&address) {
-        evm.warm_acc(&address);
+    let access_cost: i64 = if state.warm_acc(&address) {
         2600
     } else {
         100
@@ -285,8 +282,7 @@ pub fn staticcall(evm: &mut Evm, ctx: &Context, _: &Call, state: &mut dyn State)
     let is_precompile = is_precompile(&address);
 
     // EIP-2929: warm/cold address access (applies to precompiles too)
-    let access_cost: i64 = if state.is_cold_acc(&address) {
-        evm.warm_acc(&address);
+    let access_cost: i64 = if state.warm_acc(&address) {
         2600
     } else {
         100
@@ -342,8 +338,7 @@ pub fn selfdestruct(
     let beneficiary: Acc = beneficiary.to();
 
     // EIP-2929: warm/cold address access for beneficiary
-    let access_cost: i64 = if state.is_cold_acc(&beneficiary) {
-        evm.warm_acc(&beneficiary);
+    let access_cost: i64 = if state.warm_acc(&beneficiary) {
         2600
     } else {
         100

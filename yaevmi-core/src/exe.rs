@@ -230,6 +230,8 @@ impl Executor {
                     code: (Buf::default(), Int::ZERO),
                 },
             );
+            // EIP-2929: add newly created address to accessed_addresses
+            state.warm_acc(&created);
         }
         transfer(&self.call, &mode, state);
         let _ = frame.evm.gas_charge(intrinsic);
@@ -413,6 +415,9 @@ impl Executor {
                                 code: (Buf::default(), Int::ZERO),
                             },
                         );
+
+                        // EIP-2929: add newly created address to accessed_addresses
+                        state.warm_acc(&created);
 
                         // Value transfer (balance already verified above)
                         if !call.eth.is_zero() {
