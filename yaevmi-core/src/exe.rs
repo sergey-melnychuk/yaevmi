@@ -630,10 +630,12 @@ impl Executor {
                 }
                 StepResult::Revert(ret) => {
                     state.revert_to(this.checkpoint);
+                    let mut gas = this.evm.gas;
+                    gas.refund = 0;
                     result = Some(CallResult::Done {
                         status: Int::ZERO,
                         ret: ret.into(),
-                        gas: this.evm.gas,
+                        gas,
                     });
                     self.callstack.pop();
                 }
