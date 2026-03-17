@@ -165,7 +165,7 @@ pub async fn run_entry(tc: &TestCase, entry: &PostEntry) -> eyre::Result<()> {
                             .collect::<Vec<_>>().join("\n");
                         format!("\nPREV:\n{steps}")
                     } else {
-                        "".to_owned()
+                        steps.last().map(|s| format!("\nPREV:\n{s:#?}")).unwrap_or_default()
                     };
                     eyre::ensure!(false, "STEP\nskip={skip}\nY={y:#?}\nR={r:#?}{full}");
                 }

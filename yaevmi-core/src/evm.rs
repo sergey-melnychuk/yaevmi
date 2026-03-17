@@ -15,6 +15,7 @@ pub enum HaltReason {
     NonStatic,
     StackUnderflow,
     StackOverflow,
+    GasBelowStipend,
 }
 
 #[derive(Debug)]
@@ -377,10 +378,13 @@ impl Evm {
                 if !is_jump(op) {
                     self.pc += 1;
                 }
-                let gas = self.gas.remaining().max(0) as u64;
-                step.gas = gas;
+                step.gas = self.gas.remaining().max(0) as u64;
                 step.stack = self.stack.len();
                 step.memory = self.memory.len();
+                if op == 0x55 {
+                    step.gas += self.pending_gas_refund as u64;
+                    step.debug = format!("refund={}", self.pending_gas_refund);
+                }
                 state.emit(Event::Step(step));
                 StepResult::Ok
             })
@@ -392,8 +396,10 @@ impl Evm {
                         match reason {
                             HaltReason::OutOfGas if op == 0x55 => {
                                 step1.gas = 0;
-                                step1.stack = 0;
-                                step1.memory = 0;
+                                step1.stack -= 2;
+                            }
+                            HaltReason::GasBelowStipend if op == 0x55 => {
+                                step1.stack -= 2;
                             }
                             _ => ()
                         }
