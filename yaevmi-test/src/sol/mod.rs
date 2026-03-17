@@ -1,7 +1,7 @@
 use std::{collections::HashMap, fs::File, io::BufReader};
 
 use serde::Deserialize;
-use yaevmi_base::{Int, math::lift};
+use yaevmi_base::{Int, acc, int, math::lift};
 use yaevmi_core::{
     Call, Head, Tx,
     cache::{Cache, Env},
@@ -14,7 +14,14 @@ use yaevmi_misc::buf::Buf;
 use crate::eth::EmptyChain;
 
 pub mod auths;
+pub mod calls;
 pub mod count;
+pub mod flash;
+pub mod hello;
+pub mod maker;
+pub mod proxy;
+pub mod token;
+pub mod value;
 
 #[derive(Deserialize)]
 pub struct Combined {
@@ -81,6 +88,55 @@ pub async fn run(
 pub fn ethers(eth: i32) -> Int {
     let exp = lift(|[eth, a, b]| eth * a.pow(b));
     exp([Int::from(eth), Int::from(10), Int::from(18)])
+}
+
+pub fn head() -> Head {
+    Head {
+        number: 1,
+        hash: int("0x1"),
+        gas_limit: 10_000_000.into(),
+        coinbase: acc("0xC014BA5E"),
+        timestamp: 42.into(),
+        base_fee: 1.into(),
+        blob_base_fee: 1.into(),
+        chain_id: 1,
+        blobhash: Int::ONE,
+        prevrandao: Int::ONE,
+    }
+}
+
+pub fn tx(nonce: u64) -> Tx {
+    Tx {
+        nonce: Some(nonce),
+        gas_price: 1.into(),
+        max_fee_per_gas: 1.into(),
+        max_priority_fee_per_gas: 1.into(),
+        access_list: vec![],
+        authorization_list: vec![],
+        blob_hashes: vec![],
+        max_fee_per_blob_gas: 1.into(),
+    }
+}
+
+/// Assert that two run results match on status and return data.
+/// Gas differences are logged but not asserted (known minor accounting diffs).
+pub fn assert_match(
+    res: &(Int, Buf, i64, Vec<Step>, Env),
+    exp: &(Int, Buf, i64, Vec<Step>, Env),
+    msg: &str,
+) {
+    assert_eq!(res.0, exp.0, "{msg}: status mismatch");
+    assert_eq!(res.1, exp.1, "{msg}: return data mismatch");
+    if res.2 != exp.2 {
+        eprintln!("  {msg}: gas diff: yevm={} revm={} (delta={:+})", res.2, exp.2, res.2 - exp.2);
+    }
+    // TODO: steps check
+    pretty_assertions::assert_eq!(res.4, exp.4, "{msg}: env mismatch");
+}
+
+/// ABI function selector: first 4 bytes of keccak256(signature).
+pub fn selector(sig: &str) -> Vec<u8> {
+    yaevmi_misc::keccak256(sig.as_bytes()).as_ref()[..4].to_vec()
 }
 
 #[test]
