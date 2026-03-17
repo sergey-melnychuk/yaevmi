@@ -130,7 +130,19 @@ pub fn assert_match(
     if res.2 != exp.2 {
         eprintln!("  {msg}: gas diff: yevm={} revm={} (delta={:+})", res.2, exp.2, res.2 - exp.2);
     }
-    // TODO: steps check
+
+    let mut skip = 0;
+    for (y, r) in res.3.iter().zip(exp.3.iter()) {
+        if y == r {
+            skip += 1;
+            continue;
+        }
+        if std::env::var("STEPS").is_ok() {
+            res.3.iter().take(skip).for_each(|s| eprintln!("{s:#?}"));
+        }
+        pretty_assertions::assert_eq!(y, r, "{msg}: step mismatch at {}", skip);
+    }
+
     pretty_assertions::assert_eq!(res.4, exp.4, "{msg}: env mismatch");
 }
 
