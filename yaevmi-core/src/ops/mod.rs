@@ -116,7 +116,7 @@ pub const OPS: [(&str, Handler); 256] = [
     ("COINBASE", chain::coinbase),
     ("TIMESTAMP", chain::timestamp),
     ("NUMBER", chain::number),
-    ("PREVRANDAO", chain::prevrandao),
+    /* ("PREVRANDAO", chain::prevrandao), */ ("DIFFICULTY", chain::prevrandao),
     ("GASLIMIT", chain::gaslimit),
     ("CHAINID", chain::chainid),
     ("SELFBALANCE", chain::selfbalance),

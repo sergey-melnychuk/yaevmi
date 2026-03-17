@@ -137,7 +137,7 @@ pub fn assert_match(
             skip += 1;
             continue;
         }
-        if std::env::var("STEPS").is_ok() {
+        if std::env::var("STEP").is_ok() {
             res.3.iter().take(skip).for_each(|s| eprintln!("{s:#?}"));
         }
         pretty_assertions::assert_eq!(y, r, "{msg}: step mismatch at {}", skip);

@@ -51,6 +51,7 @@ pub struct Step {
     pub gas: u64,
     pub stack: usize,
     pub memory: usize,
+    pub debug: String,
 }
 
 impl PartialEq for Step {

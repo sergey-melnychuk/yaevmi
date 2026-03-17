@@ -151,7 +151,7 @@ pub async fn run_entry(tc: &TestCase, entry: &PostEntry) -> eyre::Result<()> {
     let yevm = crate::sol::run(call.clone(), head.clone(), env.clone(), tx.clone()).await;
     let revm = crate::revm::run(call.clone(), head.clone(), env.clone(), tx.clone()).await;
 
-    if std::env::var("STEPS").is_ok() {
+    if std::env::var("STEP").is_ok() {
         let mut steps = Vec::new();
         if let Some((yevm, revm)) = yevm.as_ref().ok().zip(revm.as_ref().ok()) {
             let y_steps = &yevm.3;
@@ -159,8 +159,15 @@ pub async fn run_entry(tc: &TestCase, entry: &PostEntry) -> eyre::Result<()> {
             let mut skip = 0;
             for (y, r) in y_steps.iter().zip(r_steps.iter()) {
                 if y != r {
-                    let steps = steps.iter().rev().map(|s| format!("{s:#?}")).collect::<Vec<_>>().join("\n");
-                    eyre::ensure!(false, "STEP\nskip={skip}\nY={y:#?}\nR={r:#?}\nPREV:\n{steps}");
+                    let full = if std::env::var("FULL").is_ok() {
+                        let steps = steps.iter().rev()
+                            .map(|s| format!("{s:#?}"))
+                            .collect::<Vec<_>>().join("\n");
+                        format!("\nPREV:\n{steps}")
+                    } else {
+                        "".to_owned()
+                    };
+                    eyre::ensure!(false, "STEP\nskip={skip}\nY={y:#?}\nR={r:#?}{full}");
                 }
                 steps.push(r.clone());
                 skip += 1;

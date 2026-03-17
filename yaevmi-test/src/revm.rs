@@ -30,7 +30,7 @@ impl<CTX> Inspector<CTX, EthInterpreter> for Tracer {
         let op = interp.bytecode.opcode();
         let name = OpCode::new(op)
             .map(|op| op.as_str())
-            .unwrap_or("UNKNOWN")
+            .unwrap_or("INVALID")
             .to_owned();
         let data = if (0x60..=0x7f).contains(&op) {
             let n = (op - 0x60 + 1) as usize;
@@ -51,6 +51,7 @@ impl<CTX> Inspector<CTX, EthInterpreter> for Tracer {
             gas,
             stack,
             memory,
+            debug: String::new(),
         });
     }
 

@@ -350,7 +350,7 @@ impl Evm {
         use crate::trace::{Event, Step};
         let pc = self.pc;
         let op = self.code[pc];
-        let name = if name.starts_with("INVALID/") { "UNKNOWN".to_string() } else { name.to_string() };
+        let name = if name.starts_with("INVALID/") { "INVALID".to_string() } else { name.to_string() };
         let data = self.data(pc);
         let data = if data.is_empty() {
             None
@@ -366,6 +366,7 @@ impl Evm {
             gas,
             stack: self.stack.len(),
             memory: self.memory.len(),
+            debug: String::new(),
         };
         let mut step1 = step.clone();
 
@@ -387,17 +388,16 @@ impl Evm {
                 Ok(match evm_yield {
                     EvmYield::Fetch(fetch) => StepResult::Fetch(fetch),
                     EvmYield::Halt(reason) => {
+                        step1.gas -= self.pending_gas_charge as u64;
                         match reason {
-                            HaltReason::OutOfGas => {
+                            HaltReason::OutOfGas if op == 0x55 => {
                                 step1.gas = 0;
                                 step1.stack = 0;
                                 step1.memory = 0;
                             }
-                            _ => {
-                                step1.gas -= self.pending_gas_charge as u64;
-                            }
+                            _ => ()
                         }
-                        // step1.name = format!("{}_HALT={:?}", step1.name, reason);
+                        step1.debug = format!("HALT:{:?}", reason);
                         state.emit(Event::Step(step1));
                         StepResult::Halt(reason)
                     }
@@ -407,6 +407,7 @@ impl Evm {
                         step1.gas = gas;
                         step1.stack = self.stack.len();
                         step1.memory = self.memory.len();
+                        step1.debug = format!("RETURN:size={}", ret.len());
                         state.emit(Event::Step(step1));
                         StepResult::Return(ret)
                     }
@@ -416,6 +417,7 @@ impl Evm {
                         step1.gas = gas;
                         step1.stack = self.stack.len();
                         step1.memory = self.memory.len();
+                        step1.debug = format!("REVERT:size={}", ret.len());
                         state.emit(Event::Step(step1));
                         StepResult::Revert(ret)
                     }
@@ -424,6 +426,7 @@ impl Evm {
                         step1.gas = gas;
                         step1.stack = self.stack.len() - self.pending_stack_pops + self.pending_stack_push.len();
                         step1.memory = self.memory.len();
+                        step1.debug = format!("CALL:to={}", call.to);
                         state.emit(Event::Step(step1));
                         StepResult::Call(call, mode)
                     }
