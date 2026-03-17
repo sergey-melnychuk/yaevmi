@@ -321,15 +321,11 @@ impl Executor {
                                 let _ = this.evm.mem_put(offset, size, ret.as_slice());
                             }
                         }
-                        // When child succeeds: return all unused gas (including stipend).
-                        // When child fails: cap return at gas_sent (stipend is not returned).
-                        let unused = (gas.limit - gas.spent).max(0);
-                        let return_gas = if status.is_zero() {
-                            let gas_sent = gas.limit - this.stipend;
-                            unused.min(gas_sent)
-                        } else {
-                            unused
-                        };
+                        // Return all unused child gas to the parent, regardless of
+                        // success or failure.  The 2300 stipend is a free subsidy —
+                        // any portion the child did not consume flows back to the
+                        // caller (this matches geth / revm behaviour).
+                        let return_gas = (gas.limit - gas.spent).max(0);
                         this.evm.gas.spent -= return_gas;
                         // Only propagate refund on success; reverted refunds are discarded.
                         if !status.is_zero() {

@@ -5,7 +5,6 @@ use yaevmi_misc::buf::Buf;
 /// Deploy Flash and MockBorrower, fund both, then execute a flash loan.
 /// The MockBorrower receives the loan and repays it in the same transaction.
 #[tokio::test]
-#[ignore = "TODO: FIXME"]
 async fn test_flash_loan() -> eyre::Result<()> {
     let combined = super::load()?;
     let flash_src = &combined.contracts["sol/flash.sol:Flash"];
