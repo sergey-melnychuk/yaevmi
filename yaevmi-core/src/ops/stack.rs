@@ -126,8 +126,8 @@ mod tests {
         push(&mut evm, &ctx(), &call(), &mut state()).unwrap();
         evm.apply(&mut state());
         assert_eq!(evm.stack.len(), 1);
-        assert_eq!(evm.pc, 1);
-        assert_eq!(evm.stack[0], Int::from(0xFF));
+        assert_eq!(evm.pc, 2);
+        assert_eq!(evm.stack[0], Int::from(0xFF00));
     }
 
     // --- DUP ---
