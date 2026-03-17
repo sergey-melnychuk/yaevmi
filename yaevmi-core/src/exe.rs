@@ -348,6 +348,11 @@ impl Executor {
                     } => {
                         if !code.0.is_empty() {
                             let hash = Int::from(keccak256(code.as_slice()).as_ref());
+                            use crate::trace::{Event, Target};
+                            state.emit(Event::Put(
+                                Target::Code { acc: addr, hash: Int::ZERO },
+                                hash,
+                            ));
                             state.acc_mut(&addr).code = (code, hash);
                         }
                         let _ = this.evm.push(addr.to());
@@ -479,7 +484,8 @@ impl Executor {
 
                         // Increment nonce BEFORE checkpoint so collision-reverts don't undo it
                         state.inc_nonce(&creator, Int::ONE);
-                        let _ = created; // suppress unused warning
+                        // EIP-2929: created address is warmed BEFORE checkpoint (survives revert)
+                        state.warm_acc(&created);
                     }
 
                     let checkpoint = state.checkpoint(this.ctx.depth);
@@ -519,9 +525,6 @@ impl Executor {
                                 code: (Buf::default(), Int::ZERO),
                             },
                         );
-
-                        // EIP-2929: add newly created address to accessed_addresses
-                        state.warm_acc(&created);
 
                         // Value transfer (balance already verified above)
                         if !call.eth.is_zero() {
@@ -614,7 +617,6 @@ impl Executor {
                             }
                         } else {
                             this.evm.gas.spent += deploy_cost;
-                            state.acc_mut(&this.ctx.this).nonce = Int::ONE;
                             CallResult::Created {
                                 acc: this.ctx.this,
                                 code: ret.into(),

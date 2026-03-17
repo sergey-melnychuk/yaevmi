@@ -283,6 +283,9 @@ impl Evm {
     }
 
     pub fn mem_expand(&mut self, offset: usize, size: usize) -> EvmResult<()> {
+        if size == 0 {
+            return Ok(());
+        }
         mem_check(offset, size)?;
         let len = self.memory.len();
         let end = (offset + size).div_ceil(32) * 32;
@@ -347,7 +350,7 @@ impl Evm {
         use crate::trace::{Event, Step};
         let pc = self.pc;
         let op = self.code[pc];
-        let name = name.to_string();
+        let name = if name.starts_with("INVALID/") { "UNKNOWN".to_string() } else { name.to_string() };
         let data = self.data(pc);
         let data = if data.is_empty() {
             None

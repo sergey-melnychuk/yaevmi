@@ -46,6 +46,8 @@ enum Revert {
     Value(Acc, Int),
     Temp(Acc, Int, Int),
     Code(Acc, Int),
+    Create(Acc),
+    Delete(Acc),
 }
 
 #[derive(Default)]
@@ -384,7 +386,8 @@ impl State for Cache {
                 Event::Put(Target::Code { acc, hash }, _) => Some(Revert::Code(*acc, *hash)),
                 Event::WarmAcc(acc) => Some(Revert::WarmAcc(*acc)),
                 Event::WarmKey(acc, key) => Some(Revert::WarmKey(*acc, *key)),
-                // TODO: revert CREATE{,2} & SELFDESTRUCT as well?
+                Event::Create(acc) => Some(Revert::Create(*acc)),
+                Event::Delete(acc) => Some(Revert::Delete(*acc)),
                 _ => None,
             })
             .collect();
@@ -421,8 +424,16 @@ impl State for Cache {
                         self.transient.insert((acc, key), val);
                     }
                 }
-                Revert::Code(_acc, _hash) => {
-                    // TODO: add hash => code cache
+                Revert::Code(acc, _prev_hash) => {
+                    if let Some(entry) = self.accounts.get_mut(&acc) {
+                        entry.account.code = (Buf::default(), Int::ZERO);
+                    }
+                }
+                Revert::Create(acc) => {
+                    self.created.remove(&acc);
+                }
+                Revert::Delete(acc) => {
+                    self.destroyed.remove(&acc);
                 }
                 Revert::WarmAcc(acc) => {
                     self.warm_accs.remove(&acc);

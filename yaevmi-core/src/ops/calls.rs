@@ -334,14 +334,11 @@ pub fn selfdestruct(
     let [beneficiary] = evm.peek()?;
     let beneficiary: Acc = beneficiary.to();
 
-    // EIP-2929: warm/cold address access for beneficiary
-    let access_cost: i64 = if state.is_cold_acc(&beneficiary) {
-        2600
-    } else {
-        100
-    };
+    // EIP-2929: cold address surcharge for beneficiary (no warm cost — covered by 5000 base)
+    if state.is_cold_acc(&beneficiary) {
+        evm.gas_charge(2600)?;
+    }
     evm.warm_acc(&beneficiary);
-    evm.gas_charge(access_cost)?;
 
     let balance = state.balance(&ctx.this).unwrap_or(Int::ZERO);
     if !balance.is_zero() && beneficiary != ctx.this {
