@@ -51,6 +51,10 @@ pub struct CallFrame {
     pub evm: Evm,
     pub ctx: Context,
     pub checkpoint: usize,
+    /// Return-data target (ret_offset, ret_size) for the parent frame's CALL/STATICCALL.
+    pub target: (usize, usize),
+    /// Gas stipend (2300 for value-bearing CALLs) to exclude from gas return on failure.
+    pub stipend: i64,
 }
 
 pub fn intrinsic(call: &Call, tx: &Tx, head: &Head, state: &mut impl State) -> Result<(i64, Int)> {
@@ -271,10 +275,12 @@ impl Executor {
                 state.apply();
                 return Ok(result);
             }
+            // Preserve any pre-existing balance at the CREATE address
+            let existing_balance = state.balance(&created).unwrap_or(Int::ZERO);
             state.create(
                 created,
                 Account {
-                    value: Int::ZERO,
+                    value: existing_balance,
                     nonce: Int::ONE,
                     code: (Buf::default(), Int::ZERO),
                 },
@@ -286,8 +292,6 @@ impl Executor {
         let _ = frame.evm.gas_charge(intrinsic);
         self.callstack.push(frame);
 
-        let mut target: (usize, usize) = (0, 0);
-        let mut stipend: i64 = 0;
         let mut result: Option<CallResult> = None;
         let mut steps: u64 = 0;
 
@@ -312,7 +316,7 @@ impl Executor {
                         let _ = this.evm.push(status);
                         this.evm.ret = ret.clone().into_vec();
                         if !status.is_zero() {
-                            let (offset, size) = target;
+                            let (offset, size) = this.target;
                             if size > 0 {
                                 let _ = this.evm.mem_put(offset, size, ret.as_slice());
                             }
@@ -321,17 +325,20 @@ impl Executor {
                         // When child fails: cap return at gas_sent (stipend is not returned).
                         let unused = (gas.limit - gas.spent).max(0);
                         let return_gas = if status.is_zero() {
-                            let gas_sent = gas.limit - stipend;
+                            let gas_sent = gas.limit - this.stipend;
                             unused.min(gas_sent)
                         } else {
                             unused
                         };
                         this.evm.gas.spent -= return_gas;
-                        this.evm.gas.refund += gas.refund;
+                        // Only propagate refund on success; reverted refunds are discarded.
+                        if !status.is_zero() {
+                            this.evm.gas.refund += gas.refund;
+                        }
                         this.evm.apply(state);
                         this.evm.pc += 1;
-                        target = (0, 0);
-                        stipend = 0;
+                        this.target = (0, 0);
+                        this.stipend = 0;
                         result = None;
                     }
                     CallResult::Created {
@@ -350,7 +357,7 @@ impl Executor {
                         this.evm.apply(state);
                         this.evm.pc += 1;
                         this.evm.ret.clear();
-                        stipend = 0;
+                        this.stipend = 0;
                     }
                 }
             }
@@ -435,7 +442,7 @@ impl Executor {
                             this.evm.apply(state);
                             this.evm.ret = vec![];
                             this.evm.pc += 1;
-                            target = (0, 0);
+                            this.target = (0, 0);
                             continue;
                         }
 
@@ -451,9 +458,23 @@ impl Executor {
                                 this.evm.apply(state);
                                 this.evm.ret = vec![];
                                 this.evm.pc += 1;
-                                target = (0, 0);
+                                this.target = (0, 0);
                                 continue;
                             }
+                        }
+
+                        // EIP-2681: nonce overflow check — CREATE fails if nonce >= 2^64 - 1
+                        let nonce_max = Int::from(u64::MAX);
+                        let creator_nonce = state.nonce(&creator).unwrap_or(Int::ZERO);
+                        if creator_nonce >= nonce_max {
+                            this.evm.gas.spent -= call.gas as i64;
+                            this.evm.apply(state);
+                            let _ = this.evm.push(Int::ZERO);
+                            this.evm.apply(state);
+                            this.evm.ret = vec![];
+                            this.evm.pc += 1;
+                            this.target = (0, 0);
+                            continue;
                         }
 
                         // Increment nonce BEFORE checkpoint so collision-reverts don't undo it
@@ -462,8 +483,8 @@ impl Executor {
                     }
 
                     let checkpoint = state.checkpoint(this.ctx.depth);
-                    target = mode.target().unwrap_or_default();
-                    stipend = if !call.eth.is_zero()
+                    this.target = mode.target().unwrap_or_default();
+                    this.stipend = if !call.eth.is_zero()
                         && matches!(mode, CallMode::Call(..) | CallMode::CallCode(..))
                     {
                         2300
@@ -484,15 +505,16 @@ impl Executor {
                             this.evm.apply(state);
                             this.evm.ret = vec![];
                             this.evm.pc += 1;
-                            target = (0, 0);
+                            this.target = (0, 0);
                             continue;
                         }
 
-                        // Create account with nonce=1 (EIP-161)
+                        // Create account with nonce=1 (EIP-161), preserving pre-existing balance
+                        let existing_balance = state.balance(&created).unwrap_or(Int::ZERO);
                         state.create(
                             created,
                             Account {
-                                value: Int::ZERO,
+                                value: existing_balance,
                                 nonce: Int::ONE,
                                 code: (Buf::default(), Int::ZERO),
                             },
@@ -534,7 +556,7 @@ impl Executor {
                         this.evm.apply(state);
                         this.evm.ret = vec![];
                         this.evm.pc += 1;
-                        target = (0, 0);
+                            this.target = (0, 0);
                         continue;
                     }
 
@@ -556,7 +578,7 @@ impl Executor {
                             this.evm.apply(state);
                             this.evm.ret = vec![];
                             this.evm.pc += 1;
-                            target = (0, 0);
+                            this.target = (0, 0);
                             continue;
                         }
 
@@ -577,7 +599,12 @@ impl Executor {
                     let is_create = this.call.is_create();
                     result = Some(if is_create {
                         let deploy_cost = CODE_DEPOSIT_GAS * ret.len() as i64;
-                        if ret.len() > MAX_CODE_SIZE || this.evm.gas_remaining() < deploy_cost {
+                        // EIP-3541: reject code starting with 0xEF
+                        let starts_with_ef = ret.first() == Some(&0xEF);
+                        if ret.len() > MAX_CODE_SIZE
+                            || starts_with_ef
+                            || this.evm.gas_remaining() < deploy_cost
+                        {
                             this.evm.gas.drain();
                             state.revert_to(this.checkpoint);
                             CallResult::Done {
@@ -706,5 +733,7 @@ async fn prepare(
         evm,
         ctx,
         checkpoint,
+        target: (0, 0),
+        stipend: 0,
     })
 }

@@ -326,9 +326,9 @@ pub fn selfdestruct(
 ) -> EvmResult<()> {
     evm.gas_charge(5_000)?;
 
-    // EIP-214: SELFDESTRUCT in static context reverts the transaction
+    // EIP-214: SELFDESTRUCT in static context is an exceptional halt
     if ctx.is_static {
-        return Err(EvmYield::Revert(vec![]));
+        return Err(EvmYield::Halt(HaltReason::NonStatic));
     }
 
     let [beneficiary] = evm.peek()?;

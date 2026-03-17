@@ -441,6 +441,7 @@ impl State for Cache {
                 entry.account.value = Int::ZERO;
                 entry.account.nonce = Int::ZERO;
                 entry.account.code = (Buf::default(), Int::ZERO);
+                entry.storage.clear();
             }
             self.created.remove(&acc);
         }

@@ -130,7 +130,7 @@ pub fn sstore(evm: &mut Evm, ctx: &Context, _: &Call, state: &mut dyn State) -> 
     if state.warm_key(&acc, &key) {
         gas += 2100;
     }
-    evm.gas.refund(refund)?;
+    evm.gas_refund(refund)?;
     evm.gas_charge(gas)?;
     state.put(&acc, &key, val);
     Ok(())
