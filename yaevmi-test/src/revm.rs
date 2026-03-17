@@ -22,6 +22,8 @@ use yaevmi_core::cache::Env;
 pub struct Tracer {
     pub traces: Vec<Step>,
     step: Option<Step>,
+    refund: i64,
+    gas: u64,
 }
 
 impl<CTX> Inspector<CTX, EthInterpreter> for Tracer {
@@ -53,14 +55,25 @@ impl<CTX> Inspector<CTX, EthInterpreter> for Tracer {
             memory,
             debug: String::new(),
         });
+
+        self.gas = gas;
     }
 
     fn step_end(&mut self, interp: &mut Interpreter<EthInterpreter>, _context: &mut CTX) {
         let gas = interp.gas.remaining();
+        let cost = self.gas - gas;
+
+        let refund = interp.gas.refunded() - self.refund;
+        self.refund = interp.gas.refunded();
+
         if let Some(mut step) = self.step.take() {
             step.gas = gas;
             step.stack = interp.stack.len();
             step.memory = interp.memory.len();
+            step.debug = format!("cost={cost}");
+            if refund > 0 {
+                step.debug = format!("{} refund={refund}", step.debug);
+            }
             self.traces.push(step);
         }
     }
