@@ -66,7 +66,11 @@ pub fn call(evm: &mut Evm, ctx: &Context, _: &Call, state: &mut dyn State) -> Ev
     }
 
     // EIP-2929: warm/cold address access (use pending warm to survive Fetch+reset)
-    let access_cost: i64 = if state.is_cold_acc(&address) { 2600 } else { 100 };
+    let access_cost: i64 = if state.is_cold_acc(&address) {
+        2600
+    } else {
+        100
+    };
     evm.warm_acc(&address);
     evm.gas_charge(access_cost)?;
 
@@ -142,7 +146,11 @@ pub fn callcode(evm: &mut Evm, ctx: &Context, _: &Call, state: &mut dyn State) -
         return Err(EvmYield::Fetch(Fetch::Account(address)));
     };
 
-    let access_cost: i64 = if state.is_cold_acc(&address) { 2600 } else { 100 };
+    let access_cost: i64 = if state.is_cold_acc(&address) {
+        2600
+    } else {
+        100
+    };
     evm.warm_acc(&address);
     evm.gas_charge(access_cost)?;
 
@@ -207,7 +215,11 @@ pub fn delegatecall(
         return Err(EvmYield::Fetch(Fetch::Account(address)));
     };
 
-    let access_cost: i64 = if state.is_cold_acc(&address) { 2600 } else { 100 };
+    let access_cost: i64 = if state.is_cold_acc(&address) {
+        2600
+    } else {
+        100
+    };
     evm.warm_acc(&address);
     evm.gas_charge(access_cost)?;
 
@@ -221,12 +233,12 @@ pub fn delegatecall(
 
     let data = evm.mem_get(args_offset, args_size)?;
 
-    // DELEGATECALL preserves msg.sender (caller) from the parent frame
+    // DELEGATECALL preserves msg.sender and msg.value from the parent frame
     let inner_call = Call {
         by: call.by,
         to: address,
         gas,
-        eth: Int::ZERO,
+        eth: call.eth,
         data: data.to_vec().into(),
     };
 
@@ -282,7 +294,11 @@ pub fn staticcall(evm: &mut Evm, ctx: &Context, _: &Call, state: &mut dyn State)
     let is_precompile = is_precompile(&address);
 
     // EIP-2929: warm/cold address access (applies to precompiles too)
-    let access_cost: i64 = if state.is_cold_acc(&address) { 2600 } else { 100 };
+    let access_cost: i64 = if state.is_cold_acc(&address) {
+        2600
+    } else {
+        100
+    };
     evm.warm_acc(&address);
     evm.gas_charge(access_cost)?;
 
@@ -348,7 +364,7 @@ pub fn selfdestruct(
             .map(|a| a.value.is_zero() && a.nonce.is_zero() && a.code.0.0.is_empty())
             .unwrap_or(true);
         if is_empty {
-            evm.gas_charge(25_000)?;
+            evm.gas_charge(25000)?;
         }
         let add = lift(|[a, b]| a + b);
         let to_bal = state.balance(&beneficiary).unwrap_or(Int::ZERO);

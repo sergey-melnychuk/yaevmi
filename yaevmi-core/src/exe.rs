@@ -536,7 +536,7 @@ impl Executor {
                     // EIP-211: clear return data buffer when making a new call
                     this.evm.ret.clear();
 
-                    let frame = prepare(
+                    let mut frame = prepare(
                         tx.clone(),
                         head.clone(),
                         call.clone(),
@@ -546,6 +546,9 @@ impl Executor {
                         chain,
                     )
                     .await?;
+                    // Use the outer checkpoint (set before state.create / value transfer)
+                    // so that reverting the child frame undoes create + value transfer.
+                    frame.checkpoint = checkpoint;
                     if frame.ctx.depth > MAX_CALL_DEPTH {
                         state.revert_to(checkpoint);
                         // Return child gas (not consumed on depth failure)

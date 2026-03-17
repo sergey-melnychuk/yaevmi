@@ -31,6 +31,15 @@ pub fn ecrecover(input: &[u8], gas_limit: i64) -> (bool, Vec<u8>, i64) {
         Err(_) => return (true, vec![], GAS),
     };
 
+    // EVM ecrecover accepts any s in [1, n-1], but k256 recovery requires low-s.
+    // Normalize s and flip recovery id if needed.
+    let (sig, rid) = if let Some(normalized) = sig.normalize_s() {
+        let new_rid = RecoveryId::new(!rid.is_y_odd(), rid.is_x_reduced());
+        (normalized, new_rid)
+    } else {
+        (sig, rid)
+    };
+
     let key = match VerifyingKey::recover_from_prehash(&buf[0..32], &sig, rid) {
         Ok(k) => k,
         Err(_) => return (true, vec![], GAS),
