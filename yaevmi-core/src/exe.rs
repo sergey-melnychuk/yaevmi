@@ -86,6 +86,20 @@ pub fn intrinsic(call: &Call, tx: &Tx, head: &Head, state: &mut impl State) -> R
         }
     }
 
+    // EIP-1559: gasPrice / maxFeePerGas must be >= baseFee.
+    let lt = lift(|[a, b]| if a < b { U256::ONE } else { U256::ZERO });
+    if tx.max_fee_per_gas.is_zero() {
+        // Legacy tx: gasPrice must be >= baseFee
+        if !lt([tx.gas_price, head.base_fee]).is_zero() {
+            return Err(Error::MaxFeeLessThanBaseFee);
+        }
+    } else {
+        // EIP-1559 tx: maxFeePerGas must be >= baseFee
+        if !lt([tx.max_fee_per_gas, head.base_fee]).is_zero() {
+            return Err(Error::MaxFeeLessThanBaseFee);
+        }
+    }
+
     // EIP-1559: effective gas price = min(max_fee_per_gas, base_fee + max_priority_fee_per_gas).
     // For legacy tx (max_fee_per_gas == 0) use gas_price directly.
     let effective_gas_price = if tx.max_fee_per_gas.is_zero() {
@@ -100,12 +114,19 @@ pub fn intrinsic(call: &Call, tx: &Tx, head: &Head, state: &mut impl State) -> R
     };
 
     // Upfront gas deduction (YP §6.1): sender pays gas_limit × effective_gas_price.
+    // For EIP-1559 tx, balance check uses max_fee_per_gas (sender must afford worst case).
     let mul = lift(|[a, b]| a * b);
     let sub = lift(|[a, b]| a - b);
     let add = lift(|[a, b]| a + b);
     let gt = lift(|[a, b]| if a > b { U256::ONE } else { U256::ZERO });
+    let max_gas_price = if tx.max_fee_per_gas.is_zero() {
+        effective_gas_price
+    } else {
+        tx.max_fee_per_gas
+    };
+    let upfront_check = mul([Int::from(call.gas), max_gas_price]);
     let upfront = mul([Int::from(call.gas), effective_gas_price]);
-    let total_cost = add([upfront, call.eth]);
+    let total_cost = add([upfront_check, call.eth]);
     let balance = state.balance(&call.by).unwrap_or_default();
     if !gt([total_cost, balance]).is_zero() {
         return Err(Error::InsufficientFunds);
