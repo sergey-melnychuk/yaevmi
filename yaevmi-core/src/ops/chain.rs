@@ -2,7 +2,7 @@ use yaevmi_base::{Acc, Int};
 
 use crate::{
     Call,
-    evm::{Context, Evm, EvmResult, EvmYield, Fetch, HaltReason, mem_check},
+    evm::{Context, Evm, EvmResult, EvmYield, Fetch, HaltReason, mem_check_int},
     state::State,
 };
 
@@ -68,8 +68,8 @@ pub fn calldatasize(evm: &mut Evm, _: &Context, call: &Call, _: &mut dyn State) 
 pub fn calldatacopy(evm: &mut Evm, _: &Context, call: &Call, _: &mut dyn State) -> EvmResult<()> {
     evm.gas_charge(3)?;
     let [dest_offset, offset, size] = evm.peek::<3>()?;
+    mem_check_int(dest_offset, size)?;
     let (dest_offset, size) = (dest_offset.as_usize(), size.as_usize());
-    mem_check(dest_offset, size)?;
     evm.mem_expand(dest_offset, size)?;
     evm.gas_charge(3 * size.div_ceil(32) as i64)?;
     let data_len = call.data.0.len();
@@ -103,8 +103,8 @@ pub fn codesize(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmR
 pub fn codecopy(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<()> {
     evm.gas_charge(3)?;
     let [dest_offset, offset, size] = evm.peek::<3>()?;
+    mem_check_int(dest_offset, size)?;
     let (dest_offset, size) = (dest_offset.as_usize(), size.as_usize());
-    mem_check(dest_offset, size)?;
     evm.mem_expand(dest_offset, size)?;
     evm.gas_charge(3 * size.div_ceil(32) as i64)?;
     let code_len = evm.code.len();
@@ -148,6 +148,7 @@ pub fn extcodecopy(evm: &mut Evm, _: &Context, _: &Call, state: &mut dyn State) 
     evm.gas_charge(100)?;
     let [acc, dest_offset, offset, size] = evm.peek()?;
     let acc: Acc = acc.to();
+    mem_check_int(dest_offset, size)?;
     let (dest_offset, size) = (dest_offset.as_usize(), size.as_usize());
 
     let Some((code, _)) = state.code(&acc) else {
@@ -189,19 +190,41 @@ pub fn returndatasize(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -
 
 pub fn returndatacopy(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<()> {
     evm.gas_charge(3)?;
-    let [dest_offset, offset, size] = evm.peek_usize()?;
-    mem_check(offset, size)?;
-    mem_check(dest_offset, size)?;
+    let [dest_offset, offset, size] = evm.peek::<3>()?;
+    mem_check_int(offset, size)?;
+    mem_check_int(dest_offset, size)?;
+    // EVM spec: halt if copy range exceeds return data buffer (256-bit check)
+    // Fast path: when offset+size fits in usize and <= ret.len(), no need for 256-bit.
+    // Otherwise use 256-bit comparison (avoids BadCopyRange when offset/size truncate).
+    let ret_len = evm.ret.len();
+    let ret_len_int = Int::from(ret_len);
+    let (offset_u, size_u) = (offset.as_usize(), size.as_usize());
+    let ok_fast = offset_u.checked_add(size_u).map(|end| end <= ret_len).unwrap_or(false);
+    if !ok_fast {
+        let add = yaevmi_base::math::lift(|[a, b]| a + b);
+        let gt = yaevmi_base::math::lift(|[a, b]| if a > b { yaevmi_base::math::U256::ONE } else { yaevmi_base::math::U256::ZERO });
+        if !gt([add([offset, size]), ret_len_int]).is_zero() {
+            return Err(EvmYield::Halt(HaltReason::BadCopyRange));
+        }
+    }
+    let (dest_offset, offset, size) = (dest_offset.as_usize(), offset.as_usize(), size.as_usize());
     evm.gas_charge(3 * size.div_ceil(32) as i64)?;
 
-    // EVM spec: halt if copy range exceeds return data buffer
-    if offset.saturating_add(size) > evm.ret.len() {
-        return Err(EvmYield::Halt(HaltReason::BadCopyRange));
+    let ret_len = evm.ret.len();
+    let (lo, copy_len) = if offset >= ret_len {
+        (ret_len, 0)
+    } else {
+        let copy_len = size.min(ret_len - offset);
+        (offset, copy_len)
+    };
+    if copy_len > 0 {
+        let data = evm.ret[lo..lo + copy_len].to_vec();
+        evm.mem_put(dest_offset, copy_len, &data)?;
     }
-
-    if size > 0 {
-        let data = evm.ret[offset..offset + size].to_vec();
-        evm.mem_put(dest_offset, size, &data)?;
+    if copy_len < size {
+        let pad = size - copy_len;
+        let data = vec![0; pad];
+        evm.mem_put(dest_offset + copy_len, pad, &data)?;
     }
     Ok(())
 }

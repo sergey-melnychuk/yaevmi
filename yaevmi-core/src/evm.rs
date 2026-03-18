@@ -1,5 +1,6 @@
 use crate::call::Head;
 use serde::{Deserialize, Serialize};
+use yaevmi_base::math::lift;
 
 use crate::{Acc, Call, Int, Result, ops::OPS, state::State};
 
@@ -161,7 +162,8 @@ pub struct Evm {
 
 impl Evm {
     pub const STACK_SIZE_LIMIT: usize = 1024;
-    pub const MEMORY_SIZE_LIMIT: usize = 4 * K * K;
+    /// Max memory size in bytes; matches revm/geth (2^32 - 1).
+    pub const MEMORY_SIZE_LIMIT: usize = (1_usize << 32) - 1;
 
     pub fn new(head: Head, code: Vec<u8>, gas: u64, gas_price: Int) -> Self {
         Self {
@@ -451,8 +453,24 @@ impl Evm {
     }
 }
 
+/// Check memory range using 256-bit values (avoids truncation before check).
+pub fn mem_check_int(offset: Int, size: Int) -> EvmResult<()> {
+    let limit = Int::from(Evm::MEMORY_SIZE_LIMIT);
+    let add = lift(|[a, b]| a + b);
+    let gt = lift(|[a, b]| if a > b { yaevmi_base::math::U256::ONE } else { yaevmi_base::math::U256::ZERO });
+    if !gt([size, limit]).is_zero() {
+        return Err(EvmYield::Halt(HaltReason::OutOfMemory));
+    }
+    let end = add([offset, size]);
+    if !gt([end, limit]).is_zero() {
+        return Err(EvmYield::Halt(HaltReason::OutOfMemory));
+    }
+    Ok(())
+}
+
 pub fn mem_check(offset: usize, size: usize) -> EvmResult<()> {
-    if size < Evm::MEMORY_SIZE_LIMIT && offset <= Evm::MEMORY_SIZE_LIMIT - size {
+    let limit = Evm::MEMORY_SIZE_LIMIT;
+    if size <= limit && offset <= limit.saturating_sub(size) {
         return Ok(());
     }
     Err(EvmYield::Halt(HaltReason::OutOfMemory))
