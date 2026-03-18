@@ -183,7 +183,12 @@ pub async fn run_entry(tc: &TestCase, entry: &PostEntry) -> eyre::Result<()> {
         eyre::ensure!(yevm.is_err(), "expected exception '{expect}'");
         return Ok(());
     } else {
-        match yevm {
+        let target = if std::env::var("REVM").is_ok() {
+            revm
+        } else {
+            yevm
+        };
+        match target {
             Ok(result) => result,
             Err(e) => {
                 // skip this annoying failing test (call to 0x != create, makes no sense, ffs)
@@ -253,7 +258,7 @@ fn skip_test(path: &std::path::Path) -> bool {
         .unwrap_or_default();
 
     // the same skip list as revm uses when running statetest
-    // https://github.com/bluealloy/revm/blob/main/bins/revme/src/cmd/statetest/runner.rs#L77
+    // https://github.com/bluealloy/revm/blob/e03804e304e081eec297409a9a012b3237286a23/bins/revme/src/cmd/statetest/runner.rs#L77
     matches!(
         name,
         // Test check if gas price overflows, we handle this correctly but does not match tests specific exception.
