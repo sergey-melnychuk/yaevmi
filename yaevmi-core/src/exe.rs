@@ -426,10 +426,7 @@ impl Executor {
 
                         // Value transfer only on success — failure reverts all child-frame
                         // state changes, including the value transfer.
-                        if ok
-                            && !call.eth.is_zero()
-                            && matches!(mode, CallMode::Call(..))
-                        {
+                        if ok && !call.eth.is_zero() && matches!(mode, CallMode::Call(..)) {
                             let sub = lift(|[a, b]| a - b);
                             let add = lift(|[a, b]| a + b);
                             let by0 = state.balance(&call.by).unwrap_or_default();

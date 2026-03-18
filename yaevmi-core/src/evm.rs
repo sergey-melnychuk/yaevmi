@@ -248,7 +248,12 @@ impl Evm {
     }
 
     pub fn push(&mut self, int: Int) -> EvmResult<()> {
-        if self.stack.len() >= Self::STACK_SIZE_LIMIT {
+        let effective = self
+            .stack
+            .len()
+            .saturating_sub(self.pending_stack_pops)
+            .saturating_add(self.pending_stack_push.len());
+        if effective >= Self::STACK_SIZE_LIMIT {
             return Err(EvmYield::Halt(HaltReason::StackOverflow));
         }
         self.pending_stack_push.push(int);
