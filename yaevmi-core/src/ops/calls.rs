@@ -88,9 +88,9 @@ pub fn call(evm: &mut Evm, ctx: &Context, _: &Call, state: &mut dyn State) -> Ev
     }
 
     // New account cost (sending value to dead account per EIP-161).
-    // Precompile addresses are always considered "existing" — no new-account cost.
-    if !is_precompile(&address) {
-        // Must load callee before charging: if not in state, fetch to determine emptiness.
+    // Applies to ALL addresses including precompiles — if the precompile address
+    // is empty in the state, the 25000 cost is charged just like any other address.
+    if has_value {
         if state.acc(&address).is_none() {
             return Err(EvmYield::Fetch(Fetch::Account(address)));
         }
@@ -98,8 +98,7 @@ pub fn call(evm: &mut Evm, ctx: &Context, _: &Call, state: &mut dyn State) -> Ev
             .acc(&address)
             .map(|a| a.value.is_zero() && a.nonce.is_zero() && a.code.0.0.is_empty())
             .unwrap_or(true);
-        // EIP-161: only charge when BOTH value>0 AND account is dead (empty).
-        if has_value && is_empty {
+        if is_empty {
             evm.gas_charge(25000)?;
         }
     }

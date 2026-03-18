@@ -416,9 +416,18 @@ impl Executor {
                         // EIP-211: clear return data before new call
                         this.evm.ret.clear();
 
-                        // Value transfer for precompile CALL
-                        if !call.eth.is_zero()
-                            && matches!(mode, CallMode::Call(..) | CallMode::CallCode(..))
+                        // Precompile runs inline. Replace child-gas reservation with actual used
+                        // (avoids OOG when child_gas > remaining); keep access cost.
+                        let (ok, out, gas_used) =
+                            crate::pre::run(call.to.as_u64(), &call.data.0, call.gas as i64);
+                        this.evm.ret = out.clone();
+                        this.evm.pending_gas_charge -= call.gas as i64;
+                        this.evm.pending_gas_charge += gas_used;
+
+                        // Value transfer only on success — failure reverts all child-frame
+                        // state changes, including the value transfer.
+                        if ok
+                            && !call.eth.is_zero()
                             && matches!(mode, CallMode::Call(..))
                         {
                             let sub = lift(|[a, b]| a - b);
@@ -429,13 +438,6 @@ impl Executor {
                             state.set_value(&call.to, add([to0, call.eth]));
                         }
 
-                        // Precompile runs inline. Replace child-gas reservation with actual used
-                        // (avoids OOG when child_gas > remaining); keep access cost.
-                        let (ok, out, gas_used) =
-                            crate::pre::run(call.to.as_u64(), &call.data.0, call.gas as i64);
-                        this.evm.ret = out.clone();
-                        this.evm.pending_gas_charge -= call.gas as i64;
-                        this.evm.pending_gas_charge += gas_used;
                         let status = if ok { Int::ONE } else { Int::ZERO };
                         let (ret_offset, ret_size) = mode.target().unwrap_or_default();
                         this.evm.apply(state);
