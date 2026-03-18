@@ -308,6 +308,29 @@ impl Evm {
         Ok(())
     }
 
+    /// Expand memory to cover all given regions and charge gas once for the combined expansion.
+    /// Per EVM spec, CALL/DELEGATECALL/etc. charge for expansion to max(args, ret) in one step.
+    pub fn mem_expand_max(&mut self, regions: &[(usize, usize)]) -> EvmResult<()> {
+        let mut max_end = self.memory.len();
+        for (offset, size) in regions {
+            if *size > 0 {
+                mem_check(*offset, *size)?;
+                let end = (offset + size).div_ceil(32) * 32;
+                max_end = max_end.max(end);
+            }
+        }
+        let len = self.memory.len();
+        if max_end > len {
+            let old_words = (len / 32) as i64;
+            let new_words = (max_end / 32) as i64;
+            let cost = (new_words * new_words / 512 + 3 * new_words)
+                - (old_words * old_words / 512 + 3 * old_words);
+            self.gas_charge(cost)?;
+            self.memory.resize(max_end, 0);
+        }
+        Ok(())
+    }
+
     fn mem_store(&mut self, offset: usize, size: usize, source: Vec<u8>) {
         let _ = self.mem_expand(offset, size);
         let copy_len = source.len().min(size);
