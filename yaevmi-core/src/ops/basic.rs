@@ -6,7 +6,7 @@ use yaevmi_misc::keccak256;
 
 use crate::{
     Call,
-    evm::{Context, Evm, EvmResult, EvmYield},
+    evm::{self, Context, Evm, EvmResult, EvmYield},
     state::State,
 };
 
@@ -325,6 +325,7 @@ pub fn clz(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult
 pub fn hash(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<()> {
     evm.gas_charge(30)?;
     let [offset, size] = evm.peek()?;
+    evm::mem_check_int(offset, size)?;
     let (offset, size) = (offset.as_usize(), size.as_usize());
     evm.gas_charge(6 * size.div_ceil(32) as i64)?;
     let data = evm.mem_get(offset, size)?;

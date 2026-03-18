@@ -290,13 +290,18 @@ fn skip_test(path: &std::path::Path) -> bool {
 }
 
 /// Run all post-entries for a given fork in a test case.
-pub async fn run_case(tc: &TestCase, fork: &str) -> Vec<eyre::Result<()>> {
+pub async fn run_case(tc: &TestCase, fork: &str) -> Vec<(usize, eyre::Result<()>)> {
     let Some(entries) = tc.post.get(fork) else {
         return vec![];
     };
     let mut results = Vec::with_capacity(entries.len());
-    for entry in entries {
-        results.push(run_entry(tc, entry).await);
+    for (i, entry) in entries.iter().enumerate() {
+        if let Ok(case) = std::env::var("CASE") {
+            if case.parse::<usize>().ok() != Some(i) {
+                continue;
+            }
+        }
+        results.push((i, run_entry(tc, entry).await));
     }
     results
 }
@@ -346,11 +351,11 @@ async fn test_general_state_cancun() -> eyre::Result<()> {
 
                 // println!("DEBUG: Run: {file_path:?}: {}", file.len());
                 for (name, tc) in file {
-                    for result in run_case(&tc, FORK).await {
+                    for (idx, result) in run_case(&tc, FORK).await {
                         total += 1;
                         if let Err(e) = result {
                             let name = name.strip_prefix("GeneralStateTests").unwrap_or(&name);
-                            failed.push(format!("FAIL: {name}: {e}"));
+                            failed.push(format!("FAIL: {name} [entry {idx}]: {e}"));
                         }
                     }
                 }

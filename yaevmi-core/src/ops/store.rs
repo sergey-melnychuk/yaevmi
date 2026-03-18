@@ -2,7 +2,7 @@ use yaevmi_base::Int;
 
 use crate::{
     Call,
-    evm::{Context, Evm, EvmResult, EvmYield, HaltReason},
+    evm::{Context, Evm, EvmResult, EvmYield, HaltReason, mem_check_int},
     state::State,
 };
 
@@ -14,8 +14,9 @@ pub fn pop(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult
 
 pub fn mload(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<()> {
     evm.gas_charge(3)?;
-    let [offset] = evm.peek_usize()?;
-    let data = evm.mem_get(offset, 32)?;
+    let [offset] = evm.peek::<1>()?;
+    mem_check_int(offset, Int::from(32u32))?;
+    let data = evm.mem_get(offset.as_usize(), 32)?;
     let int = Int::from(&data[..]);
     evm.push(int)?;
     Ok(())
@@ -24,14 +25,15 @@ pub fn mload(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResu
 pub fn mstore(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<()> {
     evm.gas_charge(3)?;
     let [offset, value] = evm.peek()?;
-    let offset = offset.as_usize();
-    evm.mem_put(offset, 32, value.as_ref())?;
+    mem_check_int(offset, Int::from(32u32))?;
+    evm.mem_put(offset.as_usize(), 32, value.as_ref())?;
     Ok(())
 }
 
 pub fn mstore8(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<()> {
     evm.gas_charge(3)?;
     let [offset, value] = evm.peek()?;
+    mem_check_int(offset, Int::from(1u32))?;
     let (offset, value) = (offset.as_usize(), value.as_u8());
     evm.mem_put(offset, 1, &[value])?;
     Ok(())
@@ -219,7 +221,10 @@ pub fn tstore(evm: &mut Evm, ctx: &Context, _: &Call, state: &mut dyn State) -> 
 
 pub fn mcopy(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<()> {
     evm.gas_charge(3)?;
-    let [dest_offset, offset, size] = evm.peek_usize()?;
+    let [dest_offset, offset, size] = evm.peek::<3>()?;
+    mem_check_int(dest_offset, size)?;
+    mem_check_int(offset, size)?;
+    let (dest_offset, offset, size) = (dest_offset.as_usize(), offset.as_usize(), size.as_usize());
     evm.gas_charge(3 * size.div_ceil(32) as i64)?;
     let data = evm.mem_get(offset, size)?.to_vec();
     evm.mem_put(dest_offset, size, &data)?;

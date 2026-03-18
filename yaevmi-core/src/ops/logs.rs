@@ -1,6 +1,6 @@
 use crate::{
     Call,
-    evm::{Context, Evm, EvmResult, EvmYield, HaltReason},
+    evm::{self, Context, Evm, EvmResult, EvmYield, HaltReason},
     state::State,
 };
 
@@ -17,6 +17,7 @@ pub fn log(evm: &mut Evm, ctx: &Context, _: &Call, state: &mut dyn State) -> Evm
     }
 
     let [offset, size] = evm.peek()?;
+    evm::mem_check_int(offset, size)?;
     let (offset, size) = (offset.as_usize(), size.as_usize());
 
     let base = 375 + 375 * n as i64;

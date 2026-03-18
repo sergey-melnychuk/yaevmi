@@ -57,6 +57,8 @@ pub fn call(evm: &mut Evm, ctx: &Context, _: &Call, state: &mut dyn State) -> Ev
         ret_offset,
         ret_size,
     ] = evm.peek()?;
+    evm::mem_check_int(args_offset, args_size)?;
+    evm::mem_check_int(ret_offset, ret_size)?;
     let (args_offset, args_size) = (args_offset.as_usize(), args_size.as_usize());
     let (ret_offset, ret_size) = (ret_offset.as_usize(), ret_size.as_usize());
     let address: Acc = address.to();
@@ -137,6 +139,8 @@ pub fn callcode(evm: &mut Evm, ctx: &Context, _: &Call, state: &mut dyn State) -
         ret_offset,
         ret_size,
     ] = evm.peek()?;
+    evm::mem_check_int(args_offset, args_size)?;
+    evm::mem_check_int(ret_offset, ret_size)?;
     let (args_offset, args_size) = (args_offset.as_usize(), args_size.as_usize());
     let (ret_offset, ret_size) = (ret_offset.as_usize(), ret_size.as_usize());
     let address: Acc = address.to();
@@ -187,7 +191,9 @@ pub fn callcode(evm: &mut Evm, ctx: &Context, _: &Call, state: &mut dyn State) -
 }
 
 pub fn r#return(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<()> {
-    let [offset, size] = evm.peek_usize()?;
+    let [offset, size] = evm.peek()?;
+    evm::mem_check_int(offset, size)?;
+    let (offset, size) = (offset.as_usize(), size.as_usize());
     let mem = evm.mem_get(offset, size)?;
     Err(EvmYield::Return(mem.to_vec()))
 }
@@ -206,6 +212,8 @@ pub fn delegatecall(
         ret_offset,
         ret_size,
     ] = evm.peek()?;
+    evm::mem_check_int(args_offset, args_size)?;
+    evm::mem_check_int(ret_offset, ret_size)?;
     let (args_offset, args_size) = (args_offset.as_usize(), args_size.as_usize());
     let (ret_offset, ret_size) = (ret_offset.as_usize(), ret_size.as_usize());
     let address: Acc = address.to();
@@ -287,6 +295,8 @@ pub fn staticcall(evm: &mut Evm, ctx: &Context, _: &Call, state: &mut dyn State)
         ret_offset,
         ret_size,
     ] = evm.peek()?;
+    evm::mem_check_int(args_offset, args_size)?;
+    evm::mem_check_int(ret_offset, ret_size)?;
     let (args_offset, args_size) = (args_offset.as_usize(), args_size.as_usize());
     let (ret_offset, ret_size) = (ret_offset.as_usize(), ret_size.as_usize());
     let address: Acc = address.to();
@@ -328,7 +338,9 @@ pub fn staticcall(evm: &mut Evm, ctx: &Context, _: &Call, state: &mut dyn State)
 }
 
 pub fn revert(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<()> {
-    let [offset, size] = evm.peek_usize()?;
+    let [offset, size] = evm.peek()?;
+    evm::mem_check_int(offset, size)?;
+    let (offset, size) = (offset.as_usize(), size.as_usize());
     let mem = evm.mem_get(offset, size)?;
     Err(EvmYield::Revert(mem.to_vec()))
 }

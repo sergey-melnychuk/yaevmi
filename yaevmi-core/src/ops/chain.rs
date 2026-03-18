@@ -203,7 +203,8 @@ pub fn returndatacopy(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -
     if !ok_fast {
         let add = yaevmi_base::math::lift(|[a, b]| a + b);
         let gt = yaevmi_base::math::lift(|[a, b]| if a > b { yaevmi_base::math::U256::ONE } else { yaevmi_base::math::U256::ZERO });
-        if !gt([add([offset, size]), ret_len_int]).is_zero() {
+        let end = add([offset, size]);
+        if !gt([end, ret_len_int]).is_zero() {
             return Err(EvmYield::Halt(HaltReason::BadCopyRange));
         }
     }
