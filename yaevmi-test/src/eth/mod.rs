@@ -156,21 +156,25 @@ pub async fn run_entry(tc: &TestCase, entry: &PostEntry) -> eyre::Result<()> {
         if let Some((yevm, revm)) = yevm.as_ref().ok().zip(revm.as_ref().ok()) {
             let y_steps = &yevm.3;
             let r_steps = &revm.3;
-            let mut skip = 0;
-            for (y, r) in y_steps.iter().zip(r_steps.iter()) {
+            for (skip, (y, r)) in y_steps.iter().zip(r_steps.iter()).enumerate() {
                 if y != r {
                     let full = if std::env::var("FULL").is_ok() {
-                        let steps = steps.iter().rev()
+                        let steps = steps
+                            .iter()
+                            .rev()
                             .map(|s| format!("{s:#?}"))
-                            .collect::<Vec<_>>().join("\n");
+                            .collect::<Vec<_>>()
+                            .join("\n");
                         format!("\nPREV:\n{steps}")
                     } else {
-                        steps.last().map(|s| format!("\nPREV:\n{s:#?}")).unwrap_or_default()
+                        steps
+                            .last()
+                            .map(|s| format!("\nPREV:\n{s:#?}"))
+                            .unwrap_or_default()
                     };
                     eyre::ensure!(false, "STEP\nskip={skip}\nY={y:#?}\nR={r:#?}{full}");
                 }
                 steps.push(r.clone());
-                skip += 1;
             }
         }
     }

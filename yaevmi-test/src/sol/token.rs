@@ -54,7 +54,8 @@ async fn test_token_buy_use_give() -> eyre::Result<()> {
 
     let head = super::head();
     let tx0 = super::tx(0);
-    let exp0 = crate::revm::run(deploy_mock.clone(), head.clone(), env.clone(), tx0.clone()).await?;
+    let exp0 =
+        crate::revm::run(deploy_mock.clone(), head.clone(), env.clone(), tx0.clone()).await?;
     let res0 = super::run(deploy_mock, head.clone(), env, tx0).await?;
     pretty_assertions::assert_eq!(res0, exp0, "deploy MockERC20 must match revm");
 
@@ -75,7 +76,13 @@ async fn test_token_buy_use_give() -> eyre::Result<()> {
         data: Buf(token_deploy),
     };
     let tx1 = super::tx(1);
-    let exp1 = crate::revm::run(deploy_token.clone(), head.clone(), env1.clone(), tx1.clone()).await?;
+    let exp1 = crate::revm::run(
+        deploy_token.clone(),
+        head.clone(),
+        env1.clone(),
+        tx1.clone(),
+    )
+    .await?;
     let res1 = super::run(deploy_token, head.clone(), env1, tx1).await?;
     pretty_assertions::assert_eq!(res1, exp1, "deploy Token must match revm");
 
@@ -114,7 +121,13 @@ async fn test_token_buy_use_give() -> eyre::Result<()> {
         data: Buf(approve_data),
     };
     let tx3 = super::tx(0);
-    let exp3 = crate::revm::run(approve_call.clone(), head.clone(), env3.clone(), tx3.clone()).await?;
+    let exp3 = crate::revm::run(
+        approve_call.clone(),
+        head.clone(),
+        env3.clone(),
+        tx3.clone(),
+    )
+    .await?;
     let res3 = super::run(approve_call, head.clone(), env3, tx3).await?;
     pretty_assertions::assert_eq!(res3, exp3, "approve must match revm");
 
@@ -161,7 +174,8 @@ async fn test_token_buy_use_give() -> eyre::Result<()> {
         data: Buf(check_data),
     };
     let tx6 = super::tx(3);
-    let exp6 = crate::revm::run(check_call.clone(), head.clone(), env6.clone(), tx6.clone()).await?;
+    let exp6 =
+        crate::revm::run(check_call.clone(), head.clone(), env6.clone(), tx6.clone()).await?;
     let res6 = super::run(check_call, head, env6, tx6).await?;
     pretty_assertions::assert_eq!(res6, exp6, "check() must match revm");
 

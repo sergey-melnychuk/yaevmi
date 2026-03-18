@@ -35,12 +35,16 @@ async fn test_proxy_delegatecall() -> eyre::Result<()> {
 
     let head = super::head();
     let tx0 = super::tx(0);
-    let exp0 = crate::revm::run(deploy_logic.clone(), head.clone(), env.clone(), tx0.clone()).await?;
+    let exp0 =
+        crate::revm::run(deploy_logic.clone(), head.clone(), env.clone(), tx0.clone()).await?;
     let res0 = super::run(deploy_logic, head.clone(), env, tx0).await?;
     pretty_assertions::assert_eq!(res0, exp0, "deploy Logic must match revm");
 
     let deployed_logic: Acc = res0.0.to();
-    assert_eq!(deployed_logic, logic_addr, "Logic deployed at expected address");
+    assert_eq!(
+        deployed_logic, logic_addr,
+        "Logic deployed at expected address"
+    );
     let env1 = res0.4;
 
     // --- step 2: deploy Proxy(logic_addr) ---
@@ -55,12 +59,21 @@ async fn test_proxy_delegatecall() -> eyre::Result<()> {
         data: Buf(proxy_deploy_data),
     };
     let tx1 = super::tx(1);
-    let exp1 = crate::revm::run(deploy_proxy.clone(), head.clone(), env1.clone(), tx1.clone()).await?;
+    let exp1 = crate::revm::run(
+        deploy_proxy.clone(),
+        head.clone(),
+        env1.clone(),
+        tx1.clone(),
+    )
+    .await?;
     let res1 = super::run(deploy_proxy, head.clone(), env1, tx1).await?;
     pretty_assertions::assert_eq!(res1, exp1, "deploy Proxy must match revm");
 
     let deployed_proxy: Acc = res1.0.to();
-    assert_eq!(deployed_proxy, proxy_addr, "Proxy deployed at expected address");
+    assert_eq!(
+        deployed_proxy, proxy_addr,
+        "Proxy deployed at expected address"
+    );
 
     let env2 = res1.4;
     let env_pre_init = env2.clone();
@@ -112,7 +125,13 @@ async fn test_proxy_delegatecall() -> eyre::Result<()> {
         data: Buf(upgrade_data),
     };
     let tx4 = super::tx(2);
-    let exp4 = crate::revm::run(upgrade_call.clone(), head.clone(), env_pre_init.clone(), tx4.clone()).await?;
+    let exp4 = crate::revm::run(
+        upgrade_call.clone(),
+        head.clone(),
+        env_pre_init.clone(),
+        tx4.clone(),
+    )
+    .await?;
     let res4 = super::run(upgrade_call, head.clone(), env_pre_init.clone(), tx4).await?;
     pretty_assertions::assert_eq!(res4, exp4, "upgrade() must match revm");
 
@@ -125,7 +144,13 @@ async fn test_proxy_delegatecall() -> eyre::Result<()> {
         data: Buf::default(),
     };
     let tx5 = super::tx(2);
-    let exp5 = crate::revm::run(eth_call.clone(), head.clone(), env_pre_init.clone(), tx5.clone()).await?;
+    let exp5 = crate::revm::run(
+        eth_call.clone(),
+        head.clone(),
+        env_pre_init.clone(),
+        tx5.clone(),
+    )
+    .await?;
     let res5 = super::run(eth_call, head, env_pre_init, tx5).await?;
     pretty_assertions::assert_eq!(res5, exp5, "sending ETH to proxy must match revm");
 

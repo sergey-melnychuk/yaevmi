@@ -128,7 +128,12 @@ pub fn assert_match(
     assert_eq!(res.0, exp.0, "{msg}: status mismatch");
     assert_eq!(res.1, exp.1, "{msg}: return data mismatch");
     if res.2 != exp.2 {
-        eprintln!("  {msg}: gas diff: yevm={} revm={} (delta={:+})", res.2, exp.2, res.2 - exp.2);
+        eprintln!(
+            "  {msg}: gas diff: yevm={} revm={} (delta={:+})",
+            res.2,
+            exp.2,
+            res.2 - exp.2
+        );
     }
 
     let mut skip = 0;

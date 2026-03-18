@@ -239,10 +239,10 @@ impl Executor {
         }
 
         // EIP-3607: sender must be an EOA (no code)
-        if let Some(acc) = state.acc(&self.call.by) {
-            if !acc.code.0 .0.is_empty() {
-                return Err(Error::SenderNotEOA);
-            }
+        if let Some(acc) = state.acc(&self.call.by)
+            && !acc.code.0.0.is_empty()
+        {
+            return Err(Error::SenderNotEOA);
         }
 
         let mode = if self.call.is_create() {
@@ -367,7 +367,10 @@ impl Executor {
                             let hash = Int::from(keccak256(code.as_slice()).as_ref());
                             use crate::trace::{Event, Target};
                             state.emit(Event::Put(
-                                Target::Code { acc: addr, hash: Int::ZERO },
+                                Target::Code {
+                                    acc: addr,
+                                    hash: Int::ZERO,
+                                },
                                 hash,
                             ));
                             state.acc_mut(&addr).code = (code, hash);
@@ -416,15 +419,14 @@ impl Executor {
                         // Value transfer for precompile CALL
                         if !call.eth.is_zero()
                             && matches!(mode, CallMode::Call(..) | CallMode::CallCode(..))
+                            && matches!(mode, CallMode::Call(..))
                         {
-                            if matches!(mode, CallMode::Call(..)) {
-                                let sub = lift(|[a, b]| a - b);
-                                let add = lift(|[a, b]| a + b);
-                                let by0 = state.balance(&call.by).unwrap_or_default();
-                                let to0 = state.balance(&call.to).unwrap_or_default();
-                                state.set_value(&call.by, sub([by0, call.eth]));
-                                state.set_value(&call.to, add([to0, call.eth]));
-                            }
+                            let sub = lift(|[a, b]| a - b);
+                            let add = lift(|[a, b]| a + b);
+                            let by0 = state.balance(&call.by).unwrap_or_default();
+                            let to0 = state.balance(&call.to).unwrap_or_default();
+                            state.set_value(&call.by, sub([by0, call.eth]));
+                            state.set_value(&call.to, add([to0, call.eth]));
                         }
 
                         // Precompile runs inline. Replace child-gas reservation with actual used
@@ -579,7 +581,7 @@ impl Executor {
                         this.evm.apply(state);
                         this.evm.ret = vec![];
                         this.evm.pc += 1;
-                            this.target = (0, 0);
+                        this.target = (0, 0);
                         continue;
                     }
 

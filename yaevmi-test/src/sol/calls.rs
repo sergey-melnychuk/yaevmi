@@ -54,15 +54,19 @@ async fn test_caller_callee_chain() -> eyre::Result<()> {
         data: Buf(super::selector("create()")),
     };
     let tx1 = super::tx(1);
-    let exp1 = crate::revm::run(create_call.clone(), head.clone(), env1.clone(), tx1.clone()).await?;
+    let exp1 =
+        crate::revm::run(create_call.clone(), head.clone(), env1.clone(), tx1.clone()).await?;
     let res1 = super::run(create_call, head.clone(), env1, tx1).await?;
     pretty_assertions::assert_eq!(res1, exp1, "create() must match revm");
     assert_eq!(res1.0, Int::ONE, "create() must succeed");
 
     // Extract Callee address from return data (ABI-encoded address).
-    let callee_addr: Acc = Int::from(&res1.1 .0[..32]).to();
+    let callee_addr: Acc = Int::from(&res1.1.0[..32]).to();
     let expected_callee_addr = create_address(&caller_addr, 1);
-    assert_eq!(callee_addr, expected_callee_addr, "Callee deployed at expected address");
+    assert_eq!(
+        callee_addr, expected_callee_addr,
+        "Callee deployed at expected address"
+    );
 
     let env2 = res1.4;
 
@@ -79,7 +83,8 @@ async fn test_caller_callee_chain() -> eyre::Result<()> {
         data: Buf(call_data),
     };
     let tx2 = super::tx(2);
-    let exp2 = crate::revm::run(chain_call.clone(), head.clone(), env2.clone(), tx2.clone()).await?;
+    let exp2 =
+        crate::revm::run(chain_call.clone(), head.clone(), env2.clone(), tx2.clone()).await?;
     let res2 = super::run(chain_call, head, env2, tx2).await?;
     pretty_assertions::assert_eq!(res2, exp2, "call(a, b) must match revm");
 

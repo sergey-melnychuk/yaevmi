@@ -351,7 +351,11 @@ impl Evm {
         use crate::trace::{Event, Step};
         let pc = self.pc;
         let op = self.code[pc];
-        let name = if name.starts_with("INVALID/") { "INVALID".to_string() } else { name.to_string() };
+        let name = if name.starts_with("INVALID/") {
+            "INVALID".to_string()
+        } else {
+            name.to_string()
+        };
         let data = self.data(pc);
         let data = if data.is_empty() {
             None
@@ -401,7 +405,7 @@ impl Evm {
                             HaltReason::GasBelowStipend if op == 0x55 => {
                                 step1.stack -= 2;
                             }
-                            _ => ()
+                            _ => (),
                         }
                         step1.debug = format!("HALT:{:?}", reason);
                         state.emit(Event::Step(step1));
@@ -430,7 +434,8 @@ impl Evm {
                     EvmYield::Call(call, mode) => {
                         let gas = self.gas_remaining().max(0) as u64;
                         step1.gas = gas;
-                        step1.stack = self.stack.len() - self.pending_stack_pops + self.pending_stack_push.len();
+                        step1.stack = self.stack.len() - self.pending_stack_pops
+                            + self.pending_stack_push.len();
                         step1.memory = self.memory.len();
                         step1.debug = format!("CALL:to={}", call.to);
                         state.emit(Event::Step(step1));

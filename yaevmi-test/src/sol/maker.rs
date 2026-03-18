@@ -54,7 +54,13 @@ async fn test_maker_simulate() -> eyre::Result<()> {
         data: Buf(super::selector("simulate()")),
     };
     let tx1 = super::tx(1);
-    let exp1 = crate::revm::run(simulate_call.clone(), head.clone(), env1.clone(), tx1.clone()).await?;
+    let exp1 = crate::revm::run(
+        simulate_call.clone(),
+        head.clone(),
+        env1.clone(),
+        tx1.clone(),
+    )
+    .await?;
     let res1 = super::run(simulate_call, head, env1, tx1).await?;
     super::assert_match(&res1, &exp1, "simulate()");
 

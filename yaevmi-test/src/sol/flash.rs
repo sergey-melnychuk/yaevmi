@@ -33,12 +33,16 @@ async fn test_flash_loan() -> eyre::Result<()> {
 
     let head = super::head();
     let tx0 = super::tx(0);
-    let exp0 = crate::revm::run(deploy_flash.clone(), head.clone(), env.clone(), tx0.clone()).await?;
+    let exp0 =
+        crate::revm::run(deploy_flash.clone(), head.clone(), env.clone(), tx0.clone()).await?;
     let res0 = super::run(deploy_flash, head.clone(), env, tx0).await?;
     pretty_assertions::assert_eq!(res0, exp0, "deploy Flash must match revm");
 
     let deployed_flash: Acc = res0.0.to();
-    assert_eq!(deployed_flash, flash_addr, "Flash deployed at expected address");
+    assert_eq!(
+        deployed_flash, flash_addr,
+        "Flash deployed at expected address"
+    );
     let env1 = res0.4;
 
     // --- step 2: deploy MockBorrower(flash_addr) ---
@@ -53,7 +57,13 @@ async fn test_flash_loan() -> eyre::Result<()> {
         data: Buf(borrower_deploy),
     };
     let tx1 = super::tx(1);
-    let exp1 = crate::revm::run(deploy_borrower.clone(), head.clone(), env1.clone(), tx1.clone()).await?;
+    let exp1 = crate::revm::run(
+        deploy_borrower.clone(),
+        head.clone(),
+        env1.clone(),
+        tx1.clone(),
+    )
+    .await?;
     let res1 = super::run(deploy_borrower, head.clone(), env1, tx1).await?;
     pretty_assertions::assert_eq!(res1, exp1, "deploy MockBorrower must match revm");
 
@@ -69,7 +79,8 @@ async fn test_flash_loan() -> eyre::Result<()> {
         data: Buf::default(),
     };
     let tx2 = super::tx(2);
-    let exp2 = crate::revm::run(fund_flash.clone(), head.clone(), env2.clone(), tx2.clone()).await?;
+    let exp2 =
+        crate::revm::run(fund_flash.clone(), head.clone(), env2.clone(), tx2.clone()).await?;
     let res2 = super::run(fund_flash, head.clone(), env2, tx2).await?;
     pretty_assertions::assert_eq!(res2, exp2, "fund Flash must match revm");
 
@@ -84,7 +95,13 @@ async fn test_flash_loan() -> eyre::Result<()> {
         data: Buf::default(),
     };
     let tx3 = super::tx(3);
-    let exp3 = crate::revm::run(fund_borrower.clone(), head.clone(), env3.clone(), tx3.clone()).await?;
+    let exp3 = crate::revm::run(
+        fund_borrower.clone(),
+        head.clone(),
+        env3.clone(),
+        tx3.clone(),
+    )
+    .await?;
     let res3 = super::run(fund_borrower, head.clone(), env3, tx3).await?;
     pretty_assertions::assert_eq!(res3, exp3, "fund MockBorrower must match revm");
 

@@ -56,12 +56,12 @@ pub struct Step {
 
 impl PartialEq for Step {
     fn eq(&self, other: &Self) -> bool {
-        self.pc == other.pc 
-            && self.op == other.op 
-            && self.name == other.name 
-            && self.data == other.data 
-            && self.gas == other.gas 
-            && self.stack == other.stack 
+        self.pc == other.pc
+            && self.op == other.op
+            && self.name == other.name
+            && self.data == other.data
+            && self.gas == other.gas
+            && self.stack == other.stack
             && self.memory == other.memory
     }
 }

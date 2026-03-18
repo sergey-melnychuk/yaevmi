@@ -155,7 +155,13 @@ async fn test_owner_get_set_odd() -> eyre::Result<()> {
         data: Buf(set_data),
     };
     let tx4 = super::tx(0);
-    let exp4 = crate::revm::run(stranger_set.clone(), head.clone(), env1.clone(), tx4.clone()).await?;
+    let exp4 = crate::revm::run(
+        stranger_set.clone(),
+        head.clone(),
+        env1.clone(),
+        tx4.clone(),
+    )
+    .await?;
     let res4 = super::run(stranger_set, head, env1, tx4).await?;
     pretty_assertions::assert_eq!(res4, exp4, "set() by stranger must match revm");
 
