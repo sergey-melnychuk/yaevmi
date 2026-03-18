@@ -324,6 +324,11 @@ async fn test_general_state_cancun() -> eyre::Result<()> {
             if skip_test(&file_path) {
                 continue;
             }
+            if let Ok(filter) = std::env::var("TEST") {
+                if !file_path.to_str().unwrap_or_default().contains(&filter) {
+                    continue;
+                }
+            }
             let src = std::fs::read_to_string(&file_path).unwrap();
             let file: dto::TestFile = match serde_json::from_str(&src) {
                 Ok(f) => f,
