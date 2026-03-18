@@ -11,24 +11,24 @@ pub fn modexp(input: &[u8], gas_limit: i64) -> (bool, Vec<u8>, i64) {
         buf.resize(96, 0);
     }
 
-    let b_size = read_u64(&buf[0..32]) as usize;
-    let e_size = read_u64(&buf[32..64]) as usize;
-    let m_size = read_u64(&buf[64..96]) as usize;
+    let b_size_u64 = read_u64(&buf[0..32]);
+    let e_size_u64 = read_u64(&buf[32..64]);
+    let m_size_u64 = read_u64(&buf[64..96]);
 
-    // Protect against absurd sizes
-    if b_size > 8192 || e_size > 8192 || m_size > 8192 {
-        return (false, vec![], gas_limit);
-    }
-
-    // Gas calculation per EIP-2565
-    let gas = modexp_gas(b_size, e_size, m_size, &buf);
+    // Gas calculation per EIP-2565 (uses u64 sizes, saturating on overflow)
+    let gas = modexp_gas(b_size_u64, e_size_u64, m_size_u64, &buf);
     if gas > gas_limit {
         return (false, vec![], gas_limit);
     }
 
-    if m_size == 0 {
+    if m_size_u64 == 0 {
         return (true, vec![], gas);
     }
+
+    // After gas check passes, sizes are guaranteed reasonable — cast to usize
+    let b_size = b_size_u64 as usize;
+    let e_size = e_size_u64 as usize;
+    let m_size = m_size_u64 as usize;
 
     // Extract B, E, M from input (zero-pad if input is short)
     let data = &buf[96..];
@@ -79,25 +79,26 @@ fn read_u64(data: &[u8]) -> u64 {
     u64::from_be_bytes(bytes[24..32].try_into().unwrap())
 }
 
-fn modexp_gas(b_size: usize, e_size: usize, m_size: usize, input: &[u8]) -> i64 {
-    // EIP-2565 gas calculation
-    let max_len = b_size.max(m_size) as u64;
+fn modexp_gas(b_size: u64, e_size: u64, m_size: u64, input: &[u8]) -> i64 {
+    // EIP-2565 gas calculation with saturating arithmetic for large sizes
+    let max_len = b_size.max(m_size);
     let words = max_len.div_ceil(8);
-    let multiplication_complexity = words * words;
+    let multiplication_complexity = words.saturating_mul(words);
 
-    let iteration_count = calc_iteration_count(e_size, input);
+    let iteration_count = calc_iteration_count(e_size, b_size, input);
 
-    let cost = (multiplication_complexity * iteration_count.max(1)) / 3;
-    cost.max(200) as i64
+    let cost = multiplication_complexity.saturating_mul(iteration_count.max(1)) / 3;
+    cost.max(200).min(i64::MAX as u64) as i64
 }
 
-fn calc_iteration_count(e_size: usize, input: &[u8]) -> u64 {
+fn calc_iteration_count(e_size: u64, b_size: u64, input: &[u8]) -> u64 {
     let data = &input[96..];
-    let b_size = read_u64(&input[0..32]) as usize;
-    let e_start = 96 + b_size;
+    let b_size_usize = b_size.min(input.len() as u64) as usize;
+    let e_size_usize = e_size.min(input.len() as u64) as usize;
+    let e_start = 96usize.saturating_add(b_size_usize);
 
     if e_size <= 32 {
-        let e_bytes = safe_slice(data, b_size, e_size);
+        let e_bytes = safe_slice(data, b_size_usize, e_size_usize);
         let e = BigUint::from_bytes_be(&e_bytes);
         if e.is_zero() {
             return 0;
@@ -113,7 +114,7 @@ fn calc_iteration_count(e_size: usize, input: &[u8]) -> u64 {
                 &[]
             },
             0,
-            32.min(e_size),
+            32,
         );
         let e_head = BigUint::from_bytes_be(&first_32);
         let head_bits = if e_head.is_zero() {
@@ -121,6 +122,6 @@ fn calc_iteration_count(e_size: usize, input: &[u8]) -> u64 {
         } else {
             e_head.bits() as u64 - 1
         };
-        head_bits + 8 * (e_size as u64 - 32)
+        head_bits.saturating_add(8u64.saturating_mul(e_size - 32))
     }
 }
