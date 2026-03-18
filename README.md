@@ -44,3 +44,9 @@ wasm-pack build --target web
 python3 -m http.server
 ## open http://localhost:8000/
 ```
+
+## Links
+
+1. [YellowPaper](https://ethereum.github.io/yellowpaper/paper.pdf)
+
+2. [EVM.codes](https://www.evm.codes/)
