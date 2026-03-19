@@ -61,7 +61,9 @@ pub struct CallFrame {
 
 pub fn intrinsic(call: &Call, tx: &Tx, head: &Head, state: &mut impl State) -> Result<(i64, Int)> {
     let mut total = 21_000i64;
-    if call.is_create() {
+    let has_code = state.code(&call.to).is_some_and(|(c, _)| !c.0.is_empty());
+    let is_create = call.is_create() && !has_code;
+    if is_create {
         total += 32_000;
         // EIP-3860: 2 gas per 32-byte word of initcode
         total += 2 * ((call.data.0.len() as i64 + 31) / 32);
@@ -70,10 +72,13 @@ pub fn intrinsic(call: &Call, tx: &Tx, head: &Head, state: &mut impl State) -> R
     let non_zeroes = call.data.0.len() - zeroes;
     total += (zeroes * 4 + non_zeroes * 16) as i64;
 
-    // EIP-2929: pre-warm sender, target, coinbase, and precompile addresses
+    // EIP-2929: pre-warm sender, target, coinbase, and precompile addresses.
+    // For CREATE (to==0x0) there is no target; do not warm 0x0.
     state.warm_acc(&call.by);
-    state.warm_acc(&call.to);
-    state.warm_acc(&head.coinbase.to());
+    if !is_create {
+        state.warm_acc(&call.to);
+    }
+    state.warm_acc(&head.coinbase);
     for i in 1u64..=0xa {
         state.warm_acc(&Acc::from(i));
     }
@@ -114,6 +119,18 @@ pub fn intrinsic(call: &Call, tx: &Tx, head: &Head, state: &mut impl State) -> R
             sum([head.base_fee, tx.max_priority_fee_per_gas]),
         ])
     };
+
+    // Check for overflow in effective_gas_price * call.gas
+    let mul_overflows = lift(|[a, b]| {
+        if a.checked_mul(b).is_none() {
+            U256::ONE
+        } else {
+            U256::ZERO
+        }
+    });
+    if !mul_overflows([effective_gas_price, Int::from(call.gas)]).is_zero() {
+        return Err(Error::GasLimitPriceProductOverflow);
+    }
 
     // Upfront gas deduction (YP §6.1): sender pays gas_limit × effective_gas_price.
     // For EIP-1559 tx, balance check uses max_fee_per_gas (sender must afford worst case).
@@ -222,8 +239,19 @@ impl Executor {
         if !self.callstack.is_empty() {
             return Err(Error::Internal("inconsistent state detected".into()));
         }
+        for acc in [&self.call.by, &self.call.to, &head.coinbase] {
+            if acc.is_zero() {
+                continue; // CREATE has no target; do not fetch 0x0
+            }
+            if state.acc(acc).is_none() {
+                *state.acc_mut(acc) = chain.acc(acc).await?;
+                state.warm_acc(acc);
+            }
+        }
 
         // Pre-transaction validation checks
+
+        // TODO: wrap call.to with Option to distinguish call/transfer to 0x0 from CREATE
 
         // EIP-1559: max_fee_per_gas must cover base_fee
         if !tx.max_fee_per_gas.is_zero() && tx.max_fee_per_gas < head.base_fee {
@@ -248,7 +276,11 @@ impl Executor {
             return Err(Error::SenderNotEOA);
         }
 
-        let mode = if self.call.is_create() {
+        let has_code = state
+            .code(&self.call.to)
+            .is_some_and(|(c, _)| !c.0.is_empty());
+
+        let mode = if self.call.is_create() && !has_code {
             let nonce = state.nonce(&self.call.by).unwrap_or_default();
             let created = create_address(&self.call.by, nonce.as_u64());
             CallMode::Create(created)
@@ -408,22 +440,9 @@ impl Executor {
                 }
                 StepResult::End => {
                     this.evm.apply(state);
-                    // Emit STOP step only when pc > 0 (jump past end). For empty code (pc=0),
-                    // Revm does not trace a step, so we skip to avoid mismatch.
-                    if this.evm.pc > 0 {
-                        let step_gas = this.evm.gas.remaining().max(0) as u64;
-                        let step = crate::trace::Step {
-                            pc: this.evm.pc,
-                            op: 0,
-                            name: "STOP".into(),
-                            data: None,
-                            gas: step_gas,
-                            stack: this.evm.stack.len(),
-                            memory: this.evm.memory.len(),
-                            debug: vec!["cost=0".into()],
-                        };
-                        state.emit(crate::trace::Event::Step(step));
-                    }
+
+                    // Do not emit synthetic STOP
+
                     let is_create = this.call.is_create();
                     let gas = this.evm.gas;
                     result = Some(if is_create {
@@ -444,10 +463,7 @@ impl Executor {
                 }
                 StepResult::Call(call, mode) => {
                     this.evm.apply(state);
-                    // Address 0 has no account; for CallCode/Delegatecall only, treat as empty-code precompile (returns success)
-                    let addr0_precompile = call.to == Acc::ZERO
-                        && matches!(mode, CallMode::CallCode(..) | CallMode::Delegate(..));
-                    if addr0_precompile || is_precompile(&call.to) {
+                    if is_precompile(&call.to) {
                         // EIP-211: clear return data before new call
                         this.evm.ret.clear();
 
@@ -765,12 +781,9 @@ async fn prepare(
     state: &mut impl State,
     chain: &impl Chain,
 ) -> Result<CallFrame> {
-    let is_create = call.is_create();
+    let is_create = matches!(mode, CallMode::Create(_) | CallMode::Create2(_));
     let code = if is_create {
-        let code = call.data.clone();
-        // EVM spec: init code runs with empty input data
-        call.data = Buf::default();
-        code
+        std::mem::take(&mut call.data)
     } else if let Some((code, _)) = state.code(&call.to) {
         code
     } else if let Ok((code, hash)) = chain.code(&call.to).await {

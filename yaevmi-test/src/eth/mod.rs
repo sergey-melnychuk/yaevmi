@@ -148,6 +148,10 @@ pub async fn run_entry(tc: &TestCase, entry: &PostEntry) -> eyre::Result<()> {
     let (call, tx) = build_call_tx(tc, &entry.indexes);
     let env = build_env(tc);
 
+    if std::env::var("DUMP").is_ok() {
+        println!("{call:#?}\n{tx:#?}\n{env:#?}");
+    }
+
     let yevm = crate::sol::run(call.clone(), head.clone(), env.clone(), tx.clone()).await;
     let revm = crate::revm::run(call.clone(), head.clone(), env.clone(), tx.clone()).await;
 

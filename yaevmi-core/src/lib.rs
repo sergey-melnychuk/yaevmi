@@ -33,6 +33,8 @@ pub enum Error {
     PriorityGreaterThanMaxFee,
     #[error("Gas limit exceeds block gas limit")]
     GasAllowanceExceeded,
+    #[error("Gas limit times gas price overflow")]
+    GasLimitPriceProductOverflow,
     #[error("Generic error: {0}")]
     Generic(#[from] eyre::Report),
     #[error("Internal error: {0}")]
