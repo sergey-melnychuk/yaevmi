@@ -407,6 +407,12 @@ impl Evm {
             debug: vec![],
         });
 
+        // let balance = state.balance(&ctx.this).unwrap_or_default();
+        // if let Some(step) = self.step.as_mut() {
+        //     step.debug
+        //         .push(format!("balance[{:?}]={:?}", ctx.this, balance.as_u128()));
+        // };
+
         let result = f(self, ctx, call, state);
         result
             .map(|_| {

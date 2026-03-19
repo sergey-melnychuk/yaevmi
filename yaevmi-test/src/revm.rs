@@ -74,7 +74,7 @@ impl<CTX: ContextTr> Inspector<CTX, EthInterpreter> for Tracer {
         }
     }
 
-    fn step_end(&mut self, interp: &mut Interpreter<EthInterpreter>, _context: &mut CTX) {
+    fn step_end(&mut self, interp: &mut Interpreter<EthInterpreter>, _ctx: &mut CTX) {
         let gas = interp.gas.remaining();
         let cost = self.gas - gas;
 
@@ -90,6 +90,14 @@ impl<CTX: ContextTr> Inspector<CTX, EthInterpreter> for Tracer {
                 step.debug.push(format!("refund={refund}"));
             }
             step.debug.push(format!("depth={}", self.depth));
+
+            // let target = interp.input.target_address;
+            // let balance = ctx
+            //     .balance(interp.input.target_address)
+            //     .map(|state| state.data)
+            //     .unwrap_or_default();
+            // step.debug.push(format!("balance[{target:?}]={balance:?}"));
+
             self.traces.push(step);
         }
     }

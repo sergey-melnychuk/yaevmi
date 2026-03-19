@@ -186,6 +186,11 @@ pub async fn run_entry(tc: &TestCase, entry: &PostEntry) -> eyre::Result<()> {
                 steps.push(step);
             }
         }
+        if std::env::var("DUMP").is_ok() {
+            for s in steps {
+                println!("{s:#?}");
+            }
+        }
     }
 
     let (_, _, _, _, snapshot) = if let Some(expect) = entry.expect_exception.as_ref() {

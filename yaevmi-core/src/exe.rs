@@ -44,6 +44,8 @@ impl CallResult {
 pub struct Executor {
     pub call: Call,
     pub callstack: Vec<CallFrame>,
+    /// Effective gas price for GASPRICE opcode (min(max_fee, base_fee + priority) for EIP-1559).
+    effective_gas_price: Int,
 }
 
 pub struct CallFrame {
@@ -206,6 +208,7 @@ impl Executor {
         Self {
             call,
             callstack: vec![],
+            effective_gas_price: Int::ZERO,
         }
     }
 
@@ -254,6 +257,7 @@ impl Executor {
         };
 
         let (intrinsic, effective_gas_price) = intrinsic(&self.call, &tx, &head, state)?;
+        self.effective_gas_price = effective_gas_price;
         if (self.call.gas as i64) < intrinsic {
             return Err(Error::GasTooLow {
                 have: self.call.gas,
@@ -270,6 +274,7 @@ impl Executor {
             self.call.clone(),
             mode,
             None,
+            effective_gas_price,
             state,
             chain,
         )
@@ -314,6 +319,7 @@ impl Executor {
         self.callstack.push(frame);
 
         let mut result: Option<CallResult> = None;
+        let mut last_popped_checkpoint: Option<usize> = None;
         let mut steps: u64 = 0;
 
         while let Some(this) = self.callstack.last_mut() {
@@ -335,6 +341,14 @@ impl Executor {
             if let Some(call_result) = result.take() {
                 match call_result {
                     CallResult::Done { status, ret, gas } => {
+                        // Revert failed child's state (value transfer, etc.) when call returns 0
+                        if status.is_zero() {
+                            if let Some(cp) = last_popped_checkpoint.take() {
+                                state.revert_to(cp);
+                            }
+                        } else {
+                            last_popped_checkpoint = None; // success, discard stale checkpoint
+                        }
                         let _ = this.evm.push(status);
                         this.evm.ret = ret.clone().into_vec();
                         // EIP-211: return data (success or revert) is written to memory at ret_offset
@@ -363,6 +377,7 @@ impl Executor {
                         code,
                         gas,
                     } => {
+                        last_popped_checkpoint = None; // success
                         if !code.0.is_empty() {
                             let hash = Int::from(keccak256(code.as_slice()).as_ref());
                             use crate::trace::{Event, Target};
@@ -424,6 +439,7 @@ impl Executor {
                             gas,
                         }
                     });
+                    last_popped_checkpoint = Some(this.checkpoint);
                     self.callstack.pop();
                 }
                 StepResult::Call(call, mode) => {
@@ -450,8 +466,10 @@ impl Executor {
                             let add = lift(|[a, b]| a + b);
                             let by0 = state.balance(&call.by).unwrap_or_default();
                             let to0 = state.balance(&call.to).unwrap_or_default();
-                            state.set_value(&call.by, sub([by0, call.eth]));
-                            state.set_value(&call.to, add([to0, call.eth]));
+                            if call.by != call.to {
+                                state.set_value(&call.by, sub([by0, call.eth]));
+                                state.set_value(&call.to, add([to0, call.eth]));
+                            }
                         }
 
                         let status = if ok { Int::ONE } else { Int::ZERO };
@@ -583,6 +601,7 @@ impl Executor {
                         call.clone(),
                         mode,
                         Some(&this.ctx),
+                        self.effective_gas_price,
                         state,
                         chain,
                     )
@@ -632,8 +651,10 @@ impl Executor {
                             let add = lift(|[a, b]| a + b);
                             let sub = lift(|[a, b]| a - b);
                             let to0 = state.balance(&to).unwrap_or_default();
-                            state.set_value(&by, sub([by0, call.eth]));
-                            state.set_value(&to, add([to0, call.eth]));
+                            if to != by {
+                                state.set_value(&by, sub([by0, call.eth]));
+                                state.set_value(&to, add([to0, call.eth]));
+                            }
                         }
                     }
                     self.callstack.push(frame);
@@ -703,6 +724,17 @@ impl Executor {
 
         let mut result = result.ok_or(Error::Internal("call result missing".into()))?;
 
+        // Revert top-level state when call returns 0 or CREATE returns zero address
+        let should_revert = match &result {
+            CallResult::Done { status, .. } => status.is_zero(),
+            CallResult::Created { acc, .. } => acc == &Acc::ZERO,
+        };
+        if should_revert {
+            if let Some(cp) = last_popped_checkpoint.take() {
+                state.revert_to(cp);
+            }
+        }
+
         // For top-level CREATE, store the deployed bytecode into the new account.
         if let CallResult::Created {
             acc: addr,
@@ -724,11 +756,12 @@ impl Executor {
 }
 
 async fn prepare(
-    tx: Tx,
+    _tx: Tx,
     head: Head,
     mut call: Call,
     mode: CallMode,
     ctx: Option<&Context>,
+    effective_gas_price: Int,
     state: &mut impl State,
     chain: &impl Chain,
 ) -> Result<CallFrame> {
@@ -746,7 +779,8 @@ async fn prepare(
     } else {
         Buf::default()
     };
-    let evm = Evm::new(head, code.into_vec(), call.gas, tx.gas_price);
+    // GASPRICE opcode returns effective gas price (EIP-1559: min(max_fee, base_fee + priority))
+    let evm = Evm::new(head, code.into_vec(), call.gas, effective_gas_price);
     let is_static = matches!(mode, CallMode::Static(_, _));
     let this = match mode {
         CallMode::Create(acc) => acc,
