@@ -199,10 +199,19 @@ pub fn returndatacopy(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -
     let ret_len = evm.ret.len();
     let ret_len_int = Int::from(ret_len);
     let (offset_u, size_u) = (offset.as_usize(), size.as_usize());
-    let ok_fast = offset_u.checked_add(size_u).map(|end| end <= ret_len).unwrap_or(false);
+    let ok_fast = offset_u
+        .checked_add(size_u)
+        .map(|end| end <= ret_len)
+        .unwrap_or(false);
     if !ok_fast {
         let add = yaevmi_base::math::lift(|[a, b]| a + b);
-        let gt = yaevmi_base::math::lift(|[a, b]| if a > b { yaevmi_base::math::U256::ONE } else { yaevmi_base::math::U256::ZERO });
+        let gt = yaevmi_base::math::lift(|[a, b]| {
+            if a > b {
+                yaevmi_base::math::U256::ONE
+            } else {
+                yaevmi_base::math::U256::ZERO
+            }
+        });
         let end = add([offset, size]);
         if !gt([end, ret_len_int]).is_zero() {
             return Err(EvmYield::Halt(HaltReason::BadCopyRange));

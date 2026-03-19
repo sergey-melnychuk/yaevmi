@@ -301,7 +301,6 @@ impl Executor {
         // prepare() takes a checkpoint to be able to revert,
         // so all state mutations must come AFTER that to be included.
         let mut frame = prepare(
-            tx.clone(),
             head.clone(),
             self.call.clone(),
             mode,
@@ -612,7 +611,6 @@ impl Executor {
                     this.evm.ret.clear();
 
                     let mut frame = prepare(
-                        tx.clone(),
                         head.clone(),
                         call.clone(),
                         mode,
@@ -745,10 +743,8 @@ impl Executor {
             CallResult::Done { status, .. } => status.is_zero(),
             CallResult::Created { acc, .. } => acc == &Acc::ZERO,
         };
-        if should_revert {
-            if let Some(cp) = last_popped_checkpoint.take() {
-                state.revert_to(cp);
-            }
+        if should_revert && let Some(cp) = last_popped_checkpoint.take() {
+            state.revert_to(cp);
         }
 
         // For top-level CREATE, store the deployed bytecode into the new account.
@@ -772,7 +768,6 @@ impl Executor {
 }
 
 async fn prepare(
-    _tx: Tx,
     head: Head,
     mut call: Call,
     mode: CallMode,

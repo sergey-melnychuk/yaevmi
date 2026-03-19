@@ -166,7 +166,7 @@ pub struct Evm {
 impl Evm {
     pub const STACK_SIZE_LIMIT: usize = 1024;
     /// Max memory size in bytes: (2^32 - 1)=4Gb. Sanity check: 4Mb.
-    pub const MEMORY_SIZE_LIMIT: usize = (1_usize << 32) - 1 / 1024;
+    pub const MEMORY_SIZE_LIMIT: usize = (1_usize << 32);
 
     pub fn new(head: Head, code: Vec<u8>, gas: u64, gas_price: Int) -> Self {
         Self {

@@ -313,10 +313,10 @@ pub async fn run_case(tc: &TestCase, fork: &str) -> Vec<(usize, eyre::Result<()>
     };
     let mut results = Vec::with_capacity(entries.len());
     for (i, entry) in entries.iter().enumerate() {
-        if let Ok(case) = std::env::var("CASE") {
-            if case.parse::<usize>().ok() != Some(i) {
-                continue;
-            }
+        if let Ok(case) = std::env::var("CASE")
+            && case.parse::<usize>().ok() != Some(i)
+        {
+            continue;
         }
         results.push((i, run_entry(tc, entry).await));
     }
@@ -346,10 +346,10 @@ async fn test_general_state_cancun() -> eyre::Result<()> {
             if skip_test(&file_path) {
                 continue;
             }
-            if let Ok(filter) = std::env::var("TEST") {
-                if !file_path.to_str().unwrap_or_default().contains(&filter) {
-                    continue;
-                }
+            if let Ok(filter) = std::env::var("TEST")
+                && !file_path.to_str().unwrap_or_default().contains(&filter)
+            {
+                continue;
             }
             let src = std::fs::read_to_string(&file_path).unwrap();
             let file: dto::TestFile = match serde_json::from_str(&src) {

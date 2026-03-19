@@ -59,19 +59,18 @@ impl<CTX: ContextTr> Inspector<CTX, EthInterpreter> for Tracer {
         });
         self.gas = gas;
 
-        if op == 0x55 {
-            if let (Ok(key), Ok(val)) = (interp.stack.peek(0), interp.stack.peek(1)) {
-                if let Some(step) = self.step.as_mut() {
-                    step.debug.push(format!("SSTORE: key={key:?}"));
-                    step.debug.push(format!("SSTORE: val={val:?}"));
-                }
-                // let address = interp.input.target_address;
-                // if let Some(load) = ctx.sload(address, key) {
-                //     step.debug.push(format!("SSTORE: cur={:?}", load.data));
-                //     step.debug.push(format!("SSTORE: cold={}", load.is_cold));
-                // };
-            }
+        if op == 0x55
+            && let (Ok(key), Ok(val)) = (interp.stack.peek(0), interp.stack.peek(1))
+            && let Some(step) = self.step.as_mut()
+        {
+            step.debug.push(format!("SSTORE: key={key:?}"));
+            step.debug.push(format!("SSTORE: val={val:?}"));
         }
+        // let address = interp.input.target_address;
+        // if let Some(load) = ctx.sload(address, key) {
+        //     step.debug.push(format!("SSTORE: cur={:?}", load.data));
+        //     step.debug.push(format!("SSTORE: cold={}", load.is_cold));
+        // };
     }
 
     fn step_end(&mut self, interp: &mut Interpreter<EthInterpreter>, _ctx: &mut CTX) {
