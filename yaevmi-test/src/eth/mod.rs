@@ -200,14 +200,13 @@ pub async fn run_entry(tc: &TestCase, entry: &PostEntry) -> eyre::Result<()> {
         match target {
             Ok(result) => result,
             Err(e) => {
-                // skip this annoying failing test (call to 0x != create, makes no sense, ffs)
+                // TransactionSendingToZero: gas limit 25000 < intrinsic 53000 for value transfer to new account
                 if e.to_string()
                     .contains("call gas cost (53000) exceeds the gas limit (25000)")
                 {
                     return Ok(());
-                } else {
-                    eyre::bail!(e);
                 }
+                eyre::bail!(e);
             }
         }
     };

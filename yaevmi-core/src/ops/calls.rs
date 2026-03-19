@@ -143,8 +143,10 @@ pub fn callcode(evm: &mut Evm, ctx: &Context, _: &Call, state: &mut dyn State) -
     let (args_offset, args_size) = (args_offset.as_usize(), args_size.as_usize());
     let (ret_offset, ret_size) = (ret_offset.as_usize(), ret_size.as_usize());
     let address: Acc = address.to();
-
-    if state.acc(&address).is_none() {
+    let is_precompile = is_precompile(&address);
+    // Address 0 has no account but can be called (empty code returns success)
+    let needs_account = address != Acc::ZERO && !is_precompile;
+    if needs_account && state.acc(&address).is_none() {
         return Err(EvmYield::Fetch(Fetch::Account(address)));
     };
 
@@ -215,8 +217,10 @@ pub fn delegatecall(
     let (args_offset, args_size) = (args_offset.as_usize(), args_size.as_usize());
     let (ret_offset, ret_size) = (ret_offset.as_usize(), ret_size.as_usize());
     let address: Acc = address.to();
-
-    if state.acc(&address).is_none() {
+    let is_precompile = is_precompile(&address);
+    // Address 0 has no account but can be called (empty code returns success)
+    let needs_account = address != Acc::ZERO && !is_precompile;
+    if needs_account && state.acc(&address).is_none() {
         return Err(EvmYield::Fetch(Fetch::Account(address)));
     };
 

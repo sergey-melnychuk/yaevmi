@@ -428,7 +428,10 @@ impl Executor {
                 }
                 StepResult::Call(call, mode) => {
                     this.evm.apply(state);
-                    if is_precompile(&call.to) {
+                    // Address 0 has no account; for CallCode/Delegatecall only, treat as empty-code precompile (returns success)
+                    let addr0_precompile = call.to == Acc::ZERO
+                        && matches!(mode, CallMode::CallCode(..) | CallMode::Delegate(..));
+                    if addr0_precompile || is_precompile(&call.to) {
                         // EIP-211: clear return data before new call
                         this.evm.ret.clear();
 
