@@ -1,4 +1,5 @@
 use crate::call::Head;
+use crate::trace::{Event, Step};
 use serde::{Deserialize, Serialize};
 use yaevmi_base::math::lift;
 
@@ -158,6 +159,8 @@ pub struct Evm {
     pub(crate) pending_acc_warmup: Vec<Acc>,
     pub(crate) pending_key_warmup: Vec<(Acc, Int)>,
     pub(crate) pending_mem_stores: Vec<(usize, usize, Vec<u8>)>,
+
+    pub(crate) step: Option<Step>,
 }
 
 impl Evm {
@@ -182,6 +185,7 @@ impl Evm {
             pending_mem_stores: Vec::new(),
             pending_acc_warmup: Vec::new(),
             pending_key_warmup: Vec::new(),
+            step: None,
         }
     }
 
@@ -276,6 +280,7 @@ impl Evm {
 
     pub fn gas_charge(&mut self, gas: i64) -> EvmResult<()> {
         if gas > self.gas_remaining() {
+            self.pending_gas_charge += self.gas.remaining();
             return Err(EvmYield::Halt(HaltReason::OutOfGas));
         }
         self.pending_gas_charge += gas;
@@ -378,9 +383,7 @@ impl Evm {
         };
         let (name, f) = OPS[op as usize];
 
-        use crate::trace::{Event, Step};
         let pc = self.pc;
-        let op = self.code[pc];
         let name = if name.starts_with("INVALID/") {
             "INVALID".to_string()
         } else {
@@ -393,7 +396,7 @@ impl Evm {
             Some(data.into())
         };
         let gas = self.gas.remaining().max(0) as u64;
-        let mut step = Step {
+        self.step = Some(Step {
             pc,
             op,
             name,
@@ -401,9 +404,8 @@ impl Evm {
             gas,
             stack: self.stack.len(),
             memory: self.memory.len(),
-            debug: String::new(),
-        };
-        let mut step1 = step.clone();
+            debug: vec![],
+        });
 
         let result = f(self, ctx, call, state);
         result
@@ -412,63 +414,65 @@ impl Evm {
                 if !is_jump(op) {
                     self.pc += 1;
                 }
-                step.gas = self.gas.remaining().max(0) as u64;
-                step.stack = self.stack.len();
-                step.memory = self.memory.len();
-                if op == 0x55 {
-                    step.gas += self.pending_gas_refund as u64;
-                    step.debug = format!("refund={}", self.pending_gas_refund);
+                if let Some(mut step) = self.step.take() {
+                    let cost = step.gas - self.gas.remaining().max(0) as u64;
+                    step.gas = self.gas.remaining().max(0) as u64;
+                    step.stack = self.stack.len();
+                    step.memory = self.memory.len();
+                    step.debug.push(format!("cost={cost}"));
+                    state.emit(Event::Step(step));
                 }
-                state.emit(Event::Step(step));
                 StepResult::Ok
             })
             .or_else(|evm_yield| {
                 Ok(match evm_yield {
-                    EvmYield::Fetch(fetch) => StepResult::Fetch(fetch),
+                    EvmYield::Fetch(fetch) => {
+                        self.reset();
+                        StepResult::Fetch(fetch)
+                    }
                     EvmYield::Halt(reason) => {
-                        step1.gas -= self.pending_gas_charge as u64;
-                        match reason {
-                            HaltReason::OutOfGas if op == 0x55 => {
-                                step1.gas = 0;
-                                step1.stack -= 2;
-                            }
-                            HaltReason::GasBelowStipend if op == 0x55 => {
-                                step1.stack -= 2;
-                            }
-                            _ => (),
+                        self.apply(state); // apply whatever changes were made before halting
+                        if let Some(mut step) = self.step.take() {
+                            step.gas = self.gas.remaining().max(0) as u64;
+                            step.stack = self.stack.len();
+                            step.memory = self.memory.len();
+                            step.debug.push(format!("HALT:{:?}", reason));
+                            state.emit(Event::Step(step));
                         }
-                        step1.debug = format!("HALT:{:?}", reason);
-                        state.emit(Event::Step(step1));
                         StepResult::Halt(reason)
                     }
                     EvmYield::Return(ret) => {
                         self.apply(state);
-                        let gas = self.gas.remaining().max(0) as u64;
-                        step1.gas = gas;
-                        step1.stack = self.stack.len();
-                        step1.memory = self.memory.len();
-                        step1.debug = format!("RETURN:size={}", ret.len());
-                        state.emit(Event::Step(step1));
+                        if let Some(mut step) = self.step.take() {
+                            step.gas = self.gas.remaining().max(0) as u64;
+                            step.stack = self.stack.len();
+                            step.memory = self.memory.len();
+                            step.debug.push(format!("RETURN:size={}", ret.len()));
+                            state.emit(Event::Step(step));
+                        }
                         StepResult::Return(ret)
                     }
                     EvmYield::Revert(ret) => {
                         self.apply(state);
-                        let gas = self.gas.remaining().max(0) as u64;
-                        step1.gas = gas;
-                        step1.stack = self.stack.len();
-                        step1.memory = self.memory.len();
-                        step1.debug = format!("REVERT:size={}", ret.len());
-                        state.emit(Event::Step(step1));
+                        if let Some(mut step) = self.step.take() {
+                            step.gas = self.gas.remaining().max(0) as u64;
+                            step.stack = self.stack.len();
+                            step.memory = self.memory.len();
+                            step.debug.push(format!("REVERT:size={}", ret.len()));
+                            state.emit(Event::Step(step));
+                        }
                         StepResult::Revert(ret)
                     }
                     EvmYield::Call(call, mode) => {
-                        let gas = self.gas_remaining().max(0) as u64;
-                        step1.gas = gas;
-                        step1.stack = self.stack.len() - self.pending_stack_pops
-                            + self.pending_stack_push.len();
-                        step1.memory = self.memory.len();
-                        step1.debug = format!("CALL:to={}", call.to);
-                        state.emit(Event::Step(step1));
+                        self.apply(state);
+                        if let Some(mut step) = self.step.take() {
+                            step.gas = self.gas.remaining().max(0) as u64;
+                            step.stack = self.stack.len();
+                            step.memory = self.memory.len();
+                            step.debug
+                                .push(format!("CALL:to={},gas={}", call.to, call.gas));
+                            state.emit(Event::Step(step));
+                        }
                         StepResult::Call(call, mode)
                     }
                 })
@@ -480,7 +484,13 @@ impl Evm {
 pub fn mem_check_int(offset: Int, size: Int) -> EvmResult<()> {
     let limit = Int::from(Evm::MEMORY_SIZE_LIMIT);
     let add = lift(|[a, b]| a + b);
-    let gt = lift(|[a, b]| if a > b { yaevmi_base::math::U256::ONE } else { yaevmi_base::math::U256::ZERO });
+    let gt = lift(|[a, b]| {
+        if a > b {
+            yaevmi_base::math::U256::ONE
+        } else {
+            yaevmi_base::math::U256::ZERO
+        }
+    });
     if !gt([size, limit]).is_zero() {
         return Err(EvmYield::Halt(HaltReason::OutOfMemory));
     }

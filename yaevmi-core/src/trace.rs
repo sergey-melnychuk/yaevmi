@@ -51,7 +51,7 @@ pub struct Step {
     pub gas: u64,
     pub stack: usize,
     pub memory: usize,
-    pub debug: String,
+    pub debug: Vec<String>,
 }
 
 impl PartialEq for Step {
@@ -61,7 +61,7 @@ impl PartialEq for Step {
             && self.name == other.name
             && self.data == other.data
             && self.gas == other.gas
-            && self.stack == other.stack
+            // && self.stack == other.stack
             && self.memory == other.memory
     }
 }

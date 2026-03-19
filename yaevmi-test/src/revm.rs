@@ -1,11 +1,12 @@
 use revm::bytecode::Bytecode;
 use revm::bytecode::opcode::OpCode;
-use revm::context::TxEnv;
 use revm::context::transaction::{AccessList, AccessListItem};
+use revm::context::{ContextTr, TxEnv};
 use revm::context_interface::result::{ExecResultAndState, ExecutionResult, Output};
 use revm::database::InMemoryDB;
 use revm::inspector::InspectorEvmTr;
 use revm::interpreter::interpreter_types::{Immediates, Jumps};
+use revm::interpreter::{CallInputs, CallOutcome, CreateInputs, CreateOutcome};
 use revm::interpreter::{Interpreter, interpreter::EthInterpreter};
 use revm::primitives::{Address, B256, Bytes, TxKind, U256, hardfork::SpecId};
 use revm::state::AccountInfo;
@@ -24,10 +25,11 @@ pub struct Tracer {
     step: Option<Step>,
     refund: i64,
     gas: u64,
+    depth: usize,
 }
 
-impl<CTX> Inspector<CTX, EthInterpreter> for Tracer {
-    fn step(&mut self, interp: &mut Interpreter<EthInterpreter>, _context: &mut CTX) {
+impl<CTX: ContextTr> Inspector<CTX, EthInterpreter> for Tracer {
+    fn step(&mut self, interp: &mut Interpreter<EthInterpreter>, _ctx: &mut CTX) {
         let pc = interp.bytecode.pc();
         let op = interp.bytecode.opcode();
         let name = OpCode::new(op)
@@ -53,10 +55,23 @@ impl<CTX> Inspector<CTX, EthInterpreter> for Tracer {
             gas,
             stack,
             memory,
-            debug: String::new(),
+            debug: vec![],
         });
-
         self.gas = gas;
+
+        if op == 0x55 {
+            if let (Ok(key), Ok(val)) = (interp.stack.peek(0), interp.stack.peek(1)) {
+                if let Some(step) = self.step.as_mut() {
+                    step.debug.push(format!("SSTORE: key={key:?}"));
+                    step.debug.push(format!("SSTORE: val={val:?}"));
+                }
+                // let address = interp.input.target_address;
+                // if let Some(load) = ctx.sload(address, key) {
+                //     step.debug.push(format!("SSTORE: cur={:?}", load.data));
+                //     step.debug.push(format!("SSTORE: cold={}", load.is_cold));
+                // };
+            }
+        }
     }
 
     fn step_end(&mut self, interp: &mut Interpreter<EthInterpreter>, _context: &mut CTX) {
@@ -70,12 +85,35 @@ impl<CTX> Inspector<CTX, EthInterpreter> for Tracer {
             step.gas = gas;
             step.stack = interp.stack.len();
             step.memory = interp.memory.len();
-            step.debug = format!("cost={cost}");
+            step.debug.push(format!("cost={cost}"));
             if refund > 0 {
-                step.debug = format!("{} refund={refund}", step.debug);
+                step.debug.push(format!("refund={refund}"));
             }
+            step.debug.push(format!("depth={}", self.depth));
             self.traces.push(step);
         }
+    }
+
+    fn call(&mut self, _: &mut CTX, _: &mut CallInputs) -> Option<CallOutcome> {
+        self.depth += 1;
+        None
+    }
+
+    fn call_end(&mut self, _: &mut CTX, _: &CallInputs, _: &mut CallOutcome) {
+        self.depth -= 1;
+    }
+
+    fn create(&mut self, _: &mut CTX, _: &mut CreateInputs) -> Option<CreateOutcome> {
+        self.depth += 1;
+        None
+    }
+
+    fn create_end(&mut self, _: &mut CTX, _: &CreateInputs, _: &mut CreateOutcome) {
+        self.depth -= 1;
+    }
+
+    fn selfdestruct(&mut self, _: Address, _: Address, _: U256) {
+        self.depth -= 1;
     }
 }
 

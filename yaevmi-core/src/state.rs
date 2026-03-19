@@ -46,10 +46,11 @@ pub trait State {
     fn destroyed(&self) -> Vec<Acc>;
     fn apply(&mut self);
 
+    fn set_depth(&mut self, _depth: usize) {}
     fn emit(&mut self, event: Event) -> usize;
 
     /// Take a state checkpoint; returns an opaque ID that can be passed to `revert_to`.
-    fn checkpoint(&mut self, _depth: usize) -> usize {
+    fn checkpoint(&mut self) -> usize {
         0
     }
     /// Revert all state mutations since the given checkpoint.

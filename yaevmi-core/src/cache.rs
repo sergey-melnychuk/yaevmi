@@ -340,8 +340,15 @@ impl State for Cache {
         self.logs.push((data, topics));
     }
 
-    fn emit(&mut self, event: Event) -> usize {
+    fn set_depth(&mut self, depth: usize) {
+        self.depth = depth;
+    }
+
+    fn emit(&mut self, mut event: Event) -> usize {
         let id = self.events.len();
+        if let Event::Step(step) = &mut event {
+            step.debug.push(format!("depth={}", self.depth));
+        }
         self.events.push(Trace {
             seq: id,
             event,
@@ -351,8 +358,7 @@ impl State for Cache {
         id
     }
 
-    fn checkpoint(&mut self, depth: usize) -> usize {
-        self.depth = depth;
+    fn checkpoint(&mut self) -> usize {
         self.events.len()
     }
 

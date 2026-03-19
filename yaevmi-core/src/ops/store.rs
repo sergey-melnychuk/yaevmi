@@ -129,11 +129,21 @@ pub fn sstore(evm: &mut Evm, ctx: &Context, _: &Call, state: &mut dyn State) -> 
         return Err(EvmYield::Fetch(crate::evm::Fetch::StateCell(acc, key)));
     };
     let (mut gas, refund) = sstore_gas(val, cur, org);
-    if state.warm_key(&acc, &key) {
+    let is_cold = state.is_cold_key(&acc, &key);
+    if is_cold {
+        evm.warm_key(&acc, &key);
         gas += 2100;
     }
-    evm.gas_refund(refund)?;
     evm.gas_charge(gas)?;
+    evm.gas_refund(refund)?;
+    if let Some(step) = evm.step.as_mut() {
+        step.debug.push(format!("SSTORE: key={key:?}"));
+        step.debug.push(format!("SSTORE: val={val:?}"));
+        step.debug.push(format!("SSTORE: cur={cur:?}"));
+        step.debug.push(format!("SSTORE: org={org:?}"));
+        step.debug
+            .push(format!("SSTORE: cold={is_cold} gas={gas} refund={refund}"));
+    }
     state.put(&acc, &key, val);
     Ok(())
 }

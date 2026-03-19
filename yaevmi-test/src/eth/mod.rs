@@ -24,22 +24,22 @@ pub struct EmptyChain;
 #[async_trait::async_trait]
 impl Chain for EmptyChain {
     async fn get(&self, _: &Acc, _: &Int) -> eyre::Result<Int> {
-        Ok(Default::default())
+        Ok(Default::default()) // empty/zero slots are not explicitly provided
     }
     async fn acc(&self, _: &Acc) -> eyre::Result<Account> {
-        Ok(Default::default())
+        Ok(Default::default()) // empty accounts are not explicitly provided
     }
     async fn code(&self, _: &Acc) -> eyre::Result<(Buf, Int)> {
-        Ok(Default::default())
+        eyre::bail!("EmptyChain: code(acc) not available")
     }
     async fn nonce(&self, _: &Acc) -> eyre::Result<u64> {
-        Ok(Default::default())
+        eyre::bail!("EmptyChain: nonce(acc) not available")
     }
     async fn balance(&self, _: &Acc) -> eyre::Result<Int> {
-        Ok(Default::default())
+        eyre::bail!("EmptyChain: balance(acc) not available")
     }
     async fn head(&self, _: u64) -> eyre::Result<Head> {
-        Ok(Default::default())
+        eyre::bail!("EmptyChain: head(number) not available")
     }
     async fn block(&self, number: u64) -> eyre::Result<(Head, Vec<Tx>)> {
         eyre::bail!("EmptyChain: block({number}) not available")
@@ -172,9 +172,18 @@ pub async fn run_entry(tc: &TestCase, entry: &PostEntry) -> eyre::Result<()> {
                             .map(|s| format!("\nPREV:\n{s:#?}"))
                             .unwrap_or_default()
                     };
-                    eyre::ensure!(false, "STEP\nskip={skip}\nY={y:#?}\nR={r:#?}{full}");
+                    let gas = r.gas as i64 - y.gas as i64;
+                    eyre::ensure!(
+                        false,
+                        "STEP\nskip={skip}\nY={y:#?}\nR={r:#?}\ngas=({:+})\n{full}",
+                        gas
+                    );
                 }
-                steps.push(r.clone());
+                let mut step = y.clone();
+                for line in &r.debug {
+                    step.debug.push(format!("REVM: {line}"));
+                }
+                steps.push(step);
             }
         }
     }

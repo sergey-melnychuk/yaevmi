@@ -317,6 +317,7 @@ impl Executor {
         let mut steps: u64 = 0;
 
         while let Some(this) = self.callstack.last_mut() {
+            state.set_depth(this.ctx.depth + 1);
             steps += 1;
             if steps > MAX_STEPS {
                 this.evm.gas.drain();
@@ -336,11 +337,10 @@ impl Executor {
                     CallResult::Done { status, ret, gas } => {
                         let _ = this.evm.push(status);
                         this.evm.ret = ret.clone().into_vec();
-                        if !status.is_zero() {
-                            let (offset, size) = this.target;
-                            if size > 0 {
-                                let _ = this.evm.mem_put(offset, size, ret.as_slice());
-                            }
+                        // EIP-211: return data (success or revert) is written to memory at ret_offset
+                        let (offset, size) = this.target;
+                        if size > 0 {
+                            let _ = this.evm.mem_put(offset, size, ret.as_slice());
                         }
                         // Return all unused child gas to the parent, regardless of
                         // success or failure.  The 2300 stipend is a free subsidy —
@@ -393,6 +393,22 @@ impl Executor {
                 }
                 StepResult::End => {
                     this.evm.apply(state);
+                    // Emit STOP step only when pc > 0 (jump past end). For empty code (pc=0),
+                    // Revm does not trace a step, so we skip to avoid mismatch.
+                    if this.evm.pc > 0 {
+                        let step_gas = this.evm.gas.remaining().max(0) as u64;
+                        let step = crate::trace::Step {
+                            pc: this.evm.pc,
+                            op: 0,
+                            name: "STOP".into(),
+                            data: None,
+                            gas: step_gas,
+                            stack: this.evm.stack.len(),
+                            memory: this.evm.memory.len(),
+                            debug: vec!["cost=0".into()],
+                        };
+                        state.emit(crate::trace::Event::Step(step));
+                    }
                     let is_create = this.call.is_create();
                     let gas = this.evm.gas;
                     result = Some(if is_create {
@@ -506,7 +522,7 @@ impl Executor {
                         state.warm_acc(&created);
                     }
 
-                    let checkpoint = state.checkpoint(this.ctx.depth);
+                    let checkpoint = state.checkpoint();
                     this.target = mode.target().unwrap_or_default();
                     this.stipend = if !call.eth.is_zero()
                         && matches!(mode, CallMode::Call(..) | CallMode::CallCode(..))
@@ -752,7 +768,7 @@ async fn prepare(
             this,
         }
     };
-    let checkpoint = state.checkpoint(ctx.depth);
+    let checkpoint = state.checkpoint();
     Ok(CallFrame {
         call,
         evm,
