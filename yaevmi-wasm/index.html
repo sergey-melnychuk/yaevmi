@@ -4,7 +4,7 @@
 <body>
     <p>see console</p>
     <script type="module">
-        import init, { hello, call } from './pkg/yaevmi_wasm.js';
+        import init, { hello, call, run } from './pkg/yaevmi_wasm.js';
         await init();
 
         console.log(hello('world'));
@@ -22,6 +22,21 @@
             call('computer says no');
         } catch (e) {
             console.error('failed to parse Call', e);
+        }
+
+        try {
+            const url = 'https://ethereum-rpc.publicnode.com';
+            console.log('running against', url);
+            const stream = await run(url);
+            let step;
+            while ((step = await stream.next()) !== null) {
+                console.log(step);
+            }
+            console.log('stream ended');
+            console.log('tx', stream.tx());
+            console.log('gas', stream.gas());
+        } catch (e) {
+            console.error('run failed', e);
         }
     </script>
 </body>

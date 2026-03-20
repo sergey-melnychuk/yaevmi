@@ -37,7 +37,7 @@ pub enum Event {
     Blob(u64, Int), // EIP-4844 BLOB carrying txs
 
     Step(Step),
-    Full(Step, Vec<Int>, Buf),
+    // Full(Step, Vec<Int>, Buf),
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]

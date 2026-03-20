@@ -49,6 +49,8 @@ pub trait State {
     fn set_depth(&mut self, _depth: usize) {}
     fn emit(&mut self, event: Event) -> usize;
 
+    fn reset(&mut self) {}
+
     /// Take a state checkpoint; returns an opaque ID that can be passed to `revert_to`.
     fn checkpoint(&mut self) -> usize {
         0

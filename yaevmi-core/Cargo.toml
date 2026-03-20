@@ -11,8 +11,6 @@ thiserror.workspace = true
 async-trait.workspace = true
 ethnum.workspace = true
 hex.workspace = true
-yaevmi-base.workspace = true
-yaevmi-misc.workspace = true
 k256.workspace = true
 sha2 = "0.10"
 ripemd = "0.1"
@@ -22,6 +20,9 @@ num-integer = "0.1"
 bn = { package = "substrate-bn", version = "0.6" }
 kzg-rs = "0.2"
 p256 = { version = "0.13", features = ["ecdsa"] }
+futures.workspace = true
+yaevmi-base.workspace = true
+yaevmi-misc.workspace = true
 
 ## Allow `EvmYield` as result error despite the size
 ## TODO: consider `Call(Call, CallMode),` => `Call(Box<Call>, CallMode),`

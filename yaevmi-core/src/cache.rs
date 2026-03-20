@@ -3,8 +3,9 @@ use std::collections::{HashMap, HashSet};
 use crate::{
     call::Head,
     state::{Account, State},
-    trace::{Event, Target, Trace},
+    trace::{Event, Step, Target, Trace},
 };
+use futures::channel::mpsc;
 use yaevmi_base::{Acc, Int, math::lift};
 use yaevmi_misc::buf::Buf;
 
@@ -62,21 +63,18 @@ pub struct Cache {
     depth: usize,
     pub logs: Vec<(Buf, Vec<Int>)>,
     pub events: Vec<Trace>,
+    pub sender: Option<mpsc::Sender<Step>>,
 }
 
 impl Cache {
     pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn with_sender(sender: mpsc::Sender<Step>) -> Self {
         Self {
-            accounts: HashMap::new(),
-            transient: HashMap::new(),
-            warm_accs: HashSet::new(),
-            warm_keys: HashSet::new(),
-            created: HashSet::new(),
-            destroyed: HashSet::new(),
-            hash: HashMap::new(),
-            depth: 0,
-            logs: vec![],
-            events: vec![],
+            sender: Some(sender),
+            ..Self::default()
         }
     }
 
@@ -348,6 +346,9 @@ impl State for Cache {
         let id = self.events.len();
         if let Event::Step(step) = &mut event {
             step.debug.push(format!("depth={}", self.depth));
+            if let Some(sender) = self.sender.as_mut() {
+                let _ = sender.try_send(step.clone()); // TODO: check for error
+            }
         }
         self.events.push(Trace {
             seq: id,

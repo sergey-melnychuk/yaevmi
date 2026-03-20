@@ -8,8 +8,9 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 
-[target.'cfg(target_arch = "wasm32")'.dependencies] ## comment-out this line for development
+#[target.'cfg(target_arch = "wasm32")'.dependencies] ## comment-out this line for development
 yaevmi-core.workspace = true
+futures.workspace = true
 
 js-sys = "0.3"
 web-sys = "0.3"
@@ -18,6 +19,7 @@ wasm-bindgen-futures = "0.4"
 
 serde = { version = "1.0", features = ["derive"] }
 serde-wasm-bindgen = "0.4"
+eyre.workspace = true
 
 ## Each transitive `getrandom` needs '{wasm_},js' feature enabled
 ## (Read more here: https://docs.rs/getrandom/latest/getrandom/)

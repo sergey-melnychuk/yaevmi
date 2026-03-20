@@ -1,8 +1,15 @@
-#[cfg(target_arch = "wasm32")] // comment-out this line for development
+// #[cfg(target_arch = "wasm32")] // comment-out this line for development
 mod wasm {
     use js_sys::JsString;
     use wasm_bindgen::prelude::*;
-    use yaevmi_core::Call;
+    use futures::StreamExt;
+    use futures::channel::mpsc;
+    use yaevmi_core::Int;
+    use yaevmi_core::cache::Cache;
+    use yaevmi_core::chain::Chain;
+    use yaevmi_core::exe::Executor;
+    use yaevmi_core::trace::Step;
+    use yaevmi_core::{Call, Head, Tx, rpc::Rpc};
 
     #[wasm_bindgen]
     pub fn hello(name: JsString) -> JsString {
@@ -41,6 +48,67 @@ mod wasm {
     // res.steps - array of trace objects
     ```
     */
+
+    #[wasm_bindgen]
+    pub struct Stream {
+        receiver: mpsc::Receiver<Step>,
+        gas: i32,
+        tx: Int,
+    }
+
+    #[wasm_bindgen]
+    impl Stream {
+        pub async fn next(&mut self) -> JsValue {
+            match self.receiver.next().await {
+                Some(step) => {
+                    let value = serde_wasm_bindgen::to_value(&step).unwrap_or(JsValue::NULL);
+                    release().await; // yield to JS event loop for smoothiness
+                    value
+                }
+                None => JsValue::NULL,
+            }
+        }
+
+        pub fn gas(&self) -> i32 {
+            self.gas
+        }
+
+        pub fn tx(&self) -> JsString {
+            self.tx.to_string().into()
+        }
+    }
+
+    #[wasm_bindgen]
+    pub async fn run(url: JsString) -> Result<Stream, JsError> {
+        run_inner(url)
+            .await
+            .map_err(|e| JsError::new(&e.to_string()))
+    }
+
+    async fn run_inner(url: JsString) -> eyre::Result<Stream> {
+        let rpc = Rpc::latest(url.into()).await?;
+        let (call, tx, head): (Call, Tx, Head) = {
+            let block = rpc.block(rpc.block_number + 1).await?;
+            let tx = &block.txs[0];
+            let call = tx.call.clone().into();
+            (call, tx.tx.clone(), block.head)
+        };
+        let hash = tx.hash;
+
+        let (ytx, yrx) = mpsc::channel(1024);
+        let mut cache = Cache::with_sender(ytx);
+
+        let mut exe = Executor::new(call);
+        let res = exe.run(tx, head, &mut cache, &rpc).await?;
+        let _ = cache.sender.take();
+
+        Ok(Stream { receiver: yrx, gas: res.gas().finalized as i32, tx: hash })
+    }
+
+    async fn release() {
+        let promise = js_sys::Promise::resolve(&JsValue::NULL);
+        let _ = wasm_bindgen_futures::JsFuture::from(promise).await;
+    }
 }
 
 #[cfg(target_arch = "wasm32")]

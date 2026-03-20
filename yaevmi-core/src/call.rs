@@ -171,8 +171,8 @@ pub struct AuthorizationListItem {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct TxCall {
     #[serde(default)]
-    #[serde(skip_serializing_if = "Acc::is_zero")]
-    pub to: Acc,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub to: Option<Acc>,
     pub from: Acc,
     pub input: Buf,
     pub value: Int,
@@ -183,7 +183,7 @@ impl From<TxCall> for Call {
     fn from(call: TxCall) -> Self {
         Call {
             by: call.from,
-            to: call.to,
+            to: call.to.unwrap_or_default(),
             gas: call.gas.as_u64(),
             eth: call.value,
             data: call.input,

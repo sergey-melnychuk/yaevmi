@@ -168,11 +168,8 @@ async fn call<R: DeserializeOwned>(
         if result.is_null() {
             eyre::bail!("result is null");
         } else {
-            if let Ok(result) = serde_json::from_value::<R>(result.to_owned()) {
-                return Ok(result);
-            } else {
-                eprintln!("RESULT: {:#?}", result);
-            }
+            let ret = serde_json::from_value::<R>(result.to_owned())?;
+            return Ok(ret);
         }
     }
     eprint!("JSON: {:#?}", json);
