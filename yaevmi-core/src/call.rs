@@ -116,37 +116,79 @@ pub struct Head {
     pub blobhash: Option<Int>,
     #[serde(alias = "difficulty")]
     pub prevrandao: Int,
+    pub parent_hash: Int,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Tx {
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Hex::is_zero")]
     pub chain_id: Hex<4>,
     pub nonce: Int,
     pub gas_price: Int,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Int::is_zero")]
     pub max_fee_per_gas: Int,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Int::is_zero")]
     pub max_priority_fee_per_gas: Int,
     #[serde(default)]
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub access_list: Vec<(Acc, Vec<Int>)>,
+    pub access_list: Vec<AccessListItem>,
     #[serde(default)]
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub authorization_list: Vec<(Acc, Int)>,
+    pub authorization_list: Vec<AuthorizationListItem>,
     #[serde(default)]
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub blob_hashes: Vec<Int>,
     #[serde(default)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_fee_per_blob_gas: Option<Int>,
+    pub hash: Int,
+    #[serde(rename = "transactionIndex")]
+    pub index: Int,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AccessListItem {
+    pub address: Acc,
+    pub storage_keys: Vec<Int>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AuthorizationListItem {
+    pub address: Acc,
+    pub chain_id: Int,
+    pub nonce: Int,
+    pub r: Int,
+    pub s: Int,
+    pub y_parity: Int,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct TxCall {
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Acc::is_zero")]
     pub to: Acc,
     pub from: Acc,
     pub input: Buf,
     pub value: Int,
     pub gas: Int,
+}
+
+impl From<TxCall> for Call {
+    fn from(call: TxCall) -> Self {
+        Call {
+            by: call.from,
+            to: call.to,
+            gas: call.gas.as_u64(),
+            eth: call.value,
+            data: call.input,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -195,7 +237,24 @@ mod tests {
         "timestamp": "0x69b09d6b",
         "transactions": [
             {
-                "accessList": [],
+                "accessList": [
+                    {
+                        "address": "0xf6e72db5454dd049d0788e411b06cfaf16853042",
+                        "storageKeys": [
+                            "0x0000000000000000000000000000000000000000000000000000000000000004"
+                        ]
+                    }
+                ],
+                "authorizationList": [
+                    {
+                        "address": "0x66e9d4bc80c1d04d045573c2f4631342fe6fc87d",
+                        "chainId": "0x1",
+                        "nonce": "0xa28",
+                        "r": "0xedba2225e5a2a8958d7530ef3fdd941ba5996c8a92ddb60d649f1ccabb9d686d",
+                        "s": "0x2a058bc60a7674c234739fefcbcf40bf846a7c4cf89ed850b86cb871033e7502",
+                        "yParity": "0x0"
+                    }
+                ],
                 "blockHash": "0x1f5b98ca47015bbfa9bff1b6282fd7753a0b79053876677b22ac178df53d76c7",
                 "blockNumber": "0x177e232",
                 "blockTimestamp": "0x69b1509f",

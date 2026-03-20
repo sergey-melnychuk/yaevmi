@@ -12,7 +12,13 @@ use yaevmi_base::{
     Acc, Int,
     math::{ONE, ZERO, lift},
 };
-use yaevmi_core::{Call, Head, Tx, cache::Env, call::Block, chain::Chain, state::Account};
+use yaevmi_core::{
+    Call, Head, Tx,
+    cache::Env,
+    call::{AccessListItem, Block},
+    chain::Chain,
+    state::Account,
+};
 
 use dto::{PostEntry, TestCase};
 use yaevmi_misc::buf::Buf;
@@ -131,13 +137,18 @@ pub fn build_call_tx(tc: &TestCase, idx: &dto::Indexes) -> (Call, Tx) {
                 .and_then(|v| v.as_ref())
                 .map(|vec| {
                     vec.iter()
-                        .map(|a| (a.address, a.storage_keys.to_vec()))
-                        .collect::<Vec<(Acc, Vec<Int>)>>()
+                        .map(|a| AccessListItem {
+                            address: a.address,
+                            storage_keys: a.storage_keys.to_vec(),
+                        })
+                        .collect::<Vec<_>>()
                 })
                 .unwrap_or_default(),
             authorization_list: vec![],
             blob_hashes: vec![],
             max_fee_per_blob_gas: Some(Int::ZERO),
+            hash: Int::ZERO,
+            index: Int::ZERO,
         },
     )
 }

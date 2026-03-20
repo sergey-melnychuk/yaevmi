@@ -101,6 +101,7 @@ pub fn head() -> Head {
         blob_base_fee: Some(1.into()),
         blobhash: Some(Int::ONE),
         prevrandao: Int::ONE,
+        parent_hash: int("0x1"),
     }
 }
 
@@ -115,6 +116,8 @@ pub fn tx(nonce: u64) -> Tx {
         authorization_list: vec![],
         blob_hashes: vec![],
         max_fee_per_blob_gas: Some(1.into()),
+        hash: Int::ZERO,
+        index: Int::ZERO,
     }
 }
 

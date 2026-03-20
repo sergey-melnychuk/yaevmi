@@ -31,6 +31,7 @@ async fn test_deploy_counter() -> eyre::Result<()> {
         blob_base_fee: Some(1.into()),
         blobhash: Some(Int::ONE),
         prevrandao: Int::ONE,
+        parent_hash: int("0x1"),
     };
     let call = Call {
         by: sender,
@@ -49,6 +50,8 @@ async fn test_deploy_counter() -> eyre::Result<()> {
         authorization_list: vec![],
         blob_hashes: vec![],
         max_fee_per_blob_gas: Some(1.into()),
+        hash: Int::ZERO,
+        index: Int::ZERO,
     };
 
     let exp = crate::revm::run(call.clone(), head.clone(), env.clone(), tx.clone()).await?;

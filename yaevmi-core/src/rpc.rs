@@ -12,14 +12,25 @@ use crate::{
 pub struct Rpc {
     url: String,
     http: Http,
-    hash: Int,
+    pub block_number: u64,
+    pub block_hash: Int,
 }
 
 impl Rpc {
     pub async fn latest(url: String) -> eyre::Result<Self> {
         let http = Http::new();
-        let (_, hash) = latest(&http, &url).await?;
-        Ok(Self { url, http, hash })
+        let head: Head = latest(&http, &url).await?;
+        Ok(Self {
+            url,
+            http,
+            block_number: head.number.as_u64() - 1,
+            block_hash: head.parent_hash,
+        })
+    }
+
+    pub async fn chain_id(&self) -> eyre::Result<u32> {
+        let chain_id: Int = call(&self.http, &self.url, "eth_chainId", &[]).await?;
+        Ok(chain_id.as_u32())
     }
 }
 
@@ -34,7 +45,7 @@ impl Chain for Rpc {
             &[
                 Value::String(acc.to_string()),
                 Value::String(key.to_string()),
-                Value::String(self.hash.to_string()),
+                Value::String(self.block_hash.to_string()),
             ],
         )
         .await?;
@@ -42,6 +53,7 @@ impl Chain for Rpc {
     }
 
     async fn acc(&self, acc: &Acc) -> eyre::Result<Account> {
+        // TODO: consider firing sub-calls concurrently to speed this up
         Ok(Account {
             value: self.balance(acc).await?,
             nonce: self.nonce(acc).await?.into(),
@@ -56,7 +68,7 @@ impl Chain for Rpc {
             "eth_getCode",
             &[
                 Value::String(acc.to_string()),
-                Value::String(self.hash.to_string()),
+                Value::String(self.block_hash.to_string()),
             ],
         )
         .await?;
@@ -71,7 +83,7 @@ impl Chain for Rpc {
             "eth_getTransactionCount",
             &[
                 Value::String(acc.to_string()),
-                Value::String(self.hash.to_string()),
+                Value::String(self.block_hash.to_string()),
             ],
         )
         .await?;
@@ -85,7 +97,7 @@ impl Chain for Rpc {
             "eth_getBalance",
             &[
                 Value::String(acc.to_string()),
-                Value::String(self.hash.to_string()),
+                Value::String(self.block_hash.to_string()),
             ],
         )
         .await?;
@@ -115,16 +127,15 @@ impl Chain for Rpc {
     }
 }
 
-async fn latest(http: &Http, url: &str) -> eyre::Result<(u64, Int)> {
-    let json = call(
+async fn latest(http: &Http, url: &str) -> eyre::Result<Head> {
+    let head = call(
         http,
         url,
         "eth_getBlockByNumber",
         &[Value::String("latest".to_string()), Value::Bool(false)],
     )
     .await?;
-    let head = serde_json::from_value::<Head>(json).unwrap();
-    Ok((head.number.as_u64(), head.hash))
+    Ok(head)
 }
 
 async fn call<R: DeserializeOwned>(
@@ -140,15 +151,11 @@ async fn call<R: DeserializeOwned>(
         "id": 1,
     });
     let json: Value = http.post(url, &body).await?;
-    if false {
+    if std::env::var("DEBUG").is_ok() {
         // Just for debugging until proper logging is implemented
         let body = serde_json::to_string_pretty(&body).unwrap();
         let json = serde_json::to_string_pretty(&json).unwrap();
-        eprintln!("{} -> {}", body, json);
-    }
-    if let Some(result) = json.get("result") {
-        let result = serde_json::from_value::<R>(result.to_owned())?;
-        return Ok(result);
+        println!("{} -> {}", body, json);
     }
     if let Some(error) = json.get("error") {
         if let Some(message) = error.as_str() {
@@ -157,6 +164,18 @@ async fn call<R: DeserializeOwned>(
         let message = serde_json::to_string(error)?;
         eyre::bail!(message);
     }
+    if let Some(result) = json.get("result") {
+        if result.is_null() {
+            eyre::bail!("result is null");
+        } else {
+            if let Ok(result) = serde_json::from_value::<R>(result.to_owned()) {
+                return Ok(result);
+            } else {
+                eprintln!("RESULT: {:#?}", result);
+            }
+        }
+    }
+    eprint!("JSON: {:#?}", json);
     eyre::bail!("missing: result & error")
 }
 
@@ -168,7 +187,8 @@ mod tests {
     #[ignore = "makes RPC call to a public node"]
     async fn test_latest() -> eyre::Result<()> {
         let http = Http::new();
-        let (number, hash) = latest(&http, "https://ethereum-rpc.publicnode.com").await?;
+        let head = latest(&http, "https://ethereum-rpc.publicnode.com").await?;
+        let (number, hash) = (head.number.as_u64(), head.hash);
         assert_ne!(hash, Int::ZERO);
         assert!(number > 24697386);
         Ok(())

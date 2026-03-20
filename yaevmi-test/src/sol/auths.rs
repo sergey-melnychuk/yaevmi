@@ -94,6 +94,7 @@ fn test_head() -> Head {
         blob_base_fee: Some(1.into()),
         blobhash: Some(Int::ONE),
         prevrandao: Int::ONE,
+        parent_hash: int("0x1"),
     }
 }
 
@@ -183,6 +184,8 @@ async fn test_meta_tx() -> eyre::Result<()> {
         authorization_list: vec![],
         blob_hashes: vec![],
         max_fee_per_blob_gas: Some(1.into()),
+        hash: Int::ZERO,
+        index: Int::ZERO,
     };
 
     let res = super::run(call.clone(), test_head(), env(), tx.clone()).await?;

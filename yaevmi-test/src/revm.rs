@@ -197,9 +197,9 @@ pub async fn run(
         .access_list(AccessList::from(
             tx.access_list
                 .iter()
-                .map(|(addr, slots)| AccessListItem {
-                    address: to_addr(addr),
-                    storage_keys: slots.iter().map(to_b256).collect::<Vec<B256>>(),
+                .map(|item| AccessListItem {
+                    address: to_addr(&item.address),
+                    storage_keys: item.storage_keys.iter().map(to_b256).collect::<Vec<B256>>(),
                 })
                 .collect::<Vec<AccessListItem>>(),
         ))

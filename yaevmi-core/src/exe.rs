@@ -85,11 +85,15 @@ pub fn intrinsic(call: &Call, tx: &Tx, head: &Head, state: &mut impl State) -> R
     state.warm_acc(&Acc::from(0x100u64)); // p256verify precompile
 
     // EIP-2930: access list gas (2400/address + 1900/storage key)
-    for (acc, keys) in &tx.access_list {
+    for (acc, keys) in tx
+        .access_list
+        .iter()
+        .map(|item| (item.address, &item.storage_keys))
+    {
         total += 2_400 + 1_900 * keys.len() as i64;
-        state.warm_acc(acc);
+        state.warm_acc(&acc);
         for key in keys {
-            state.warm_key(acc, key);
+            state.warm_key(&acc, key);
         }
     }
 
