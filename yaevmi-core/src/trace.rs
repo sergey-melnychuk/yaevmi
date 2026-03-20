@@ -61,7 +61,7 @@ impl PartialEq for Step {
             && self.name == other.name
             && self.data == other.data
             && self.gas == other.gas
-            // && self.stack == other.stack
+            // && self.stack == other.stack // TODO: revm leaves/pops stack values on halt depending on opcode
             && self.memory == other.memory
     }
 }

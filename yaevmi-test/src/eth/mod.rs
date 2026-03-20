@@ -12,7 +12,7 @@ use yaevmi_base::{
     Acc, Int,
     math::{ONE, ZERO, lift},
 };
-use yaevmi_core::{Call, Head, Tx, cache::Env, chain::Chain, state::Account};
+use yaevmi_core::{Call, Head, Tx, cache::Env, call::Block, chain::Chain, state::Account};
 
 use dto::{PostEntry, TestCase};
 use yaevmi_misc::buf::Buf;
@@ -41,7 +41,7 @@ impl Chain for EmptyChain {
     async fn head(&self, _: u64) -> eyre::Result<Head> {
         eyre::bail!("EmptyChain: head(number) not available")
     }
-    async fn block(&self, number: u64) -> eyre::Result<(Head, Vec<Tx>)> {
+    async fn block(&self, number: u64) -> eyre::Result<Block> {
         eyre::bail!("EmptyChain: block({number}) not available")
     }
 }
@@ -96,14 +96,13 @@ pub fn build_head(tc: &TestCase) -> Head {
         .or(tc.env.current_difficulty)
         .unwrap_or(Int::ZERO);
     Head {
-        number: tc.env.current_number.as_u64(),
+        number: tc.env.current_number.to(),
         hash,
         gas_limit: tc.env.current_gas_limit,
         coinbase: tc.env.current_coinbase.to(),
         timestamp: tc.env.current_timestamp,
         base_fee: tc.env.current_base_fee.unwrap_or(Int::ZERO),
         prevrandao: hash,
-        chain_id: 1u32,
         ..Head::default()
     }
 }
@@ -119,7 +118,8 @@ pub fn build_call_tx(tc: &TestCase, idx: &dto::Indexes) -> (Call, Tx) {
             data: tc.transaction.data[idx.data].as_slice().to_vec().into(),
         },
         Tx {
-            nonce: Some(tc.transaction.nonce.as_u64()),
+            chain_id: 1u32.into(),
+            nonce: tc.transaction.nonce.to(),
             gas_price: tc.transaction.gas_price.unwrap_or(Int::ZERO),
             max_fee_per_gas: tc.transaction.max_fee_per_gas.unwrap_or(Int::ZERO),
             max_priority_fee_per_gas: tc.transaction.max_priority_fee_per_gas.unwrap_or(Int::ZERO),
@@ -137,7 +137,7 @@ pub fn build_call_tx(tc: &TestCase, idx: &dto::Indexes) -> (Call, Tx) {
                 .unwrap_or_default(),
             authorization_list: vec![],
             blob_hashes: vec![],
-            max_fee_per_blob_gas: Int::ZERO,
+            max_fee_per_blob_gas: Some(Int::ZERO),
         },
     )
 }

@@ -289,7 +289,7 @@ pub fn timestamp(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> Evm
 
 pub fn number(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<()> {
     evm.gas_charge(2)?;
-    evm.push(evm.head.number.into())?;
+    evm.push(evm.head.number.to())?;
     Ok(())
 }
 
@@ -307,7 +307,7 @@ pub fn gaslimit(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmR
 
 pub fn chainid(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<()> {
     evm.gas_charge(2)?;
-    evm.push(evm.head.chain_id.into())?;
+    evm.push(evm.chain_id)?;
     Ok(())
 }
 
@@ -338,6 +338,6 @@ pub fn blobhash(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmR
 
 pub fn blobbasefee(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<()> {
     evm.gas_charge(2)?;
-    evm.push(evm.head.blob_base_fee)?;
+    evm.push(evm.head.blob_base_fee.unwrap_or_default())?;
     Ok(())
 }

@@ -1,11 +1,10 @@
-#![allow(dead_code)] // TODO: remove this
-
+use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
 use yaevmi_base::{Acc, Int};
 use yaevmi_misc::{buf::Buf, http::Http};
 
 use crate::{
-    call::{Head, Tx},
+    call::{Block, Head},
     chain::Chain,
     state::Account,
 };
@@ -13,47 +12,106 @@ use crate::{
 pub struct Rpc {
     url: String,
     http: Http,
-    // hash: Int,
+    hash: Int,
 }
 
 impl Rpc {
-    pub fn new(url: String) -> Self {
-        Self {
-            url,
-            http: Http::new(),
-        }
+    pub async fn latest(url: String) -> eyre::Result<Self> {
+        let http = Http::new();
+        let (_, hash) = latest(&http, &url).await?;
+        Ok(Self { url, http, hash })
     }
 }
 
 #[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
 #[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
 impl Chain for Rpc {
-    async fn get(&self, _acc: &Acc, _key: &Int) -> eyre::Result<Int> {
-        eyre::bail!("WIP")
+    async fn get(&self, acc: &Acc, key: &Int) -> eyre::Result<Int> {
+        let value = call(
+            &self.http,
+            &self.url,
+            "eth_getStorageAt",
+            &[
+                Value::String(acc.to_string()),
+                Value::String(key.to_string()),
+                Value::String(self.hash.to_string()),
+            ],
+        )
+        .await?;
+        Ok(value)
     }
 
-    async fn acc(&self, _acc: &Acc) -> eyre::Result<Account> {
-        eyre::bail!("WIP")
+    async fn acc(&self, acc: &Acc) -> eyre::Result<Account> {
+        Ok(Account {
+            value: self.balance(acc).await?,
+            nonce: self.nonce(acc).await?.into(),
+            code: self.code(acc).await?,
+        })
     }
 
-    async fn code(&self, _acc: &Acc) -> eyre::Result<(Buf, Int)> {
-        eyre::bail!("WIP")
+    async fn code(&self, acc: &Acc) -> eyre::Result<(Buf, Int)> {
+        let code: Buf = call(
+            &self.http,
+            &self.url,
+            "eth_getCode",
+            &[
+                Value::String(acc.to_string()),
+                Value::String(self.hash.to_string()),
+            ],
+        )
+        .await?;
+        let hash = yaevmi_misc::keccak256(code.as_slice());
+        Ok((code, hash))
     }
 
-    async fn nonce(&self, _acc: &Acc) -> eyre::Result<u64> {
-        eyre::bail!("WIP")
+    async fn nonce(&self, acc: &Acc) -> eyre::Result<u64> {
+        let nonce: Int = call(
+            &self.http,
+            &self.url,
+            "eth_getTransactionCount",
+            &[
+                Value::String(acc.to_string()),
+                Value::String(self.hash.to_string()),
+            ],
+        )
+        .await?;
+        Ok(nonce.as_u64())
     }
 
-    async fn balance(&self, _acc: &Acc) -> eyre::Result<Int> {
-        eyre::bail!("WIP")
+    async fn balance(&self, acc: &Acc) -> eyre::Result<Int> {
+        let balance = call(
+            &self.http,
+            &self.url,
+            "eth_getBalance",
+            &[
+                Value::String(acc.to_string()),
+                Value::String(self.hash.to_string()),
+            ],
+        )
+        .await?;
+        Ok(balance)
     }
 
-    async fn head(&self, _number: u64) -> eyre::Result<Head> {
-        eyre::bail!("WIP")
+    async fn head(&self, number: u64) -> eyre::Result<Head> {
+        let head = call(
+            &self.http,
+            &self.url,
+            "eth_getBlockByNumber",
+            &[Value::String(format!("0x{:x}", number)), Value::Bool(false)],
+        )
+        .await?;
+        Ok(head)
     }
 
-    async fn block(&self, _number: u64) -> eyre::Result<(Head, Vec<Tx>)> {
-        eyre::bail!("WIP")
+    async fn block(&self, number: u64) -> eyre::Result<Block> {
+        let block = call(
+            &self.http,
+            &self.url,
+            "eth_getBlockByNumber",
+            &[Value::String(format!("0x{:x}", number)), Value::Bool(true)],
+        )
+        .await?;
+        Ok(block)
     }
 }
 
@@ -65,12 +123,16 @@ async fn latest(http: &Http, url: &str) -> eyre::Result<(u64, Int)> {
         &[Value::String("latest".to_string()), Value::Bool(false)],
     )
     .await?;
-    eprintln!("{}", serde_json::to_string_pretty(&json).unwrap());
-    eyre::bail!("WIP")
-    // TODO: parse Head from JSON and return block number & hash
+    let head = serde_json::from_value::<Head>(json).unwrap();
+    Ok((head.number.as_u64(), head.hash))
 }
 
-async fn call(http: &Http, url: &str, method: &str, params: &[Value]) -> eyre::Result<Value> {
+async fn call<R: DeserializeOwned>(
+    http: &Http,
+    url: &str,
+    method: &str,
+    params: &[Value],
+) -> eyre::Result<R> {
     let body = json!({
         "jsonrpc": "2.0",
         "method": method,
@@ -78,8 +140,15 @@ async fn call(http: &Http, url: &str, method: &str, params: &[Value]) -> eyre::R
         "id": 1,
     });
     let json: Value = http.post(url, &body).await?;
+    if false {
+        // Just for debugging until proper logging is implemented
+        let body = serde_json::to_string_pretty(&body).unwrap();
+        let json = serde_json::to_string_pretty(&json).unwrap();
+        eprintln!("{} -> {}", body, json);
+    }
     if let Some(result) = json.get("result") {
-        return Ok(result.to_owned());
+        let result = serde_json::from_value::<R>(result.to_owned())?;
+        return Ok(result);
     }
     if let Some(error) = json.get("error") {
         if let Some(message) = error.as_str() {
@@ -96,11 +165,12 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    #[ignore]
+    #[ignore = "makes RPC call to a public node"]
     async fn test_latest() -> eyre::Result<()> {
         let http = Http::new();
-        let _ = latest(&http, "https://ethereum-rpc.publicnode.com").await?;
-        // TODO: make hermetic
+        let (number, hash) = latest(&http, "https://ethereum-rpc.publicnode.com").await?;
+        assert_ne!(hash, Int::ZERO);
+        assert!(number > 24697386);
         Ok(())
     }
 }

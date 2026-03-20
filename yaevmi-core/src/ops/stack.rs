@@ -78,7 +78,7 @@ mod tests {
     #[test]
     fn test_push0() {
         let head = Head::default();
-        let mut evm = Evm::new(head, vec![0x5F], 1000, Int::ONE); // PUSH0
+        let mut evm = Evm::new(head, vec![0x5F], 1000, Int::ONE, Int::ONE); // PUSH0
         push(&mut evm, &ctx(), &call(), &mut state()).unwrap();
         evm.apply(&mut state());
         assert_eq!(evm.stack, vec![Int::ZERO]);
@@ -88,7 +88,7 @@ mod tests {
     #[test]
     fn test_push1() {
         let head = Head::default();
-        let mut evm = Evm::new(head, vec![0x60, 0x42], 1000, Int::ONE); // PUSH1 0x42
+        let mut evm = Evm::new(head, vec![0x60, 0x42], 1000, Int::ONE, Int::ONE); // PUSH1 0x42
         push(&mut evm, &ctx(), &call(), &mut state()).unwrap();
         evm.apply(&mut state());
         assert_eq!(evm.stack, vec![int(0x42)]);
@@ -98,7 +98,7 @@ mod tests {
     #[test]
     fn test_push2() {
         let head = Head::default();
-        let mut evm = Evm::new(head, vec![0x61, 0x01, 0x02], 1000, Int::ONE); // PUSH2 0x0102
+        let mut evm = Evm::new(head, vec![0x61, 0x01, 0x02], 1000, Int::ONE, Int::ONE); // PUSH2 0x0102
         push(&mut evm, &ctx(), &call(), &mut state()).unwrap();
         evm.apply(&mut state());
         assert_eq!(evm.stack, vec![int(0x0102)]);
@@ -110,7 +110,7 @@ mod tests {
         let mut code = vec![0x7F]; // PUSH32
         code.extend(1u8..=32);
         let head = Head::default();
-        let mut evm = Evm::new(head, code, 1000, Int::ONE);
+        let mut evm = Evm::new(head, code, 1000, Int::ONE, Int::ONE);
         push(&mut evm, &ctx(), &call(), &mut state()).unwrap();
         evm.apply(&mut state());
         assert_eq!(evm.stack.len(), 1);
@@ -122,7 +122,7 @@ mod tests {
     #[test]
     fn test_push_truncated() {
         let head = Head::default();
-        let mut evm = Evm::new(head, vec![0x61, 0xFF], 1000, Int::ONE);
+        let mut evm = Evm::new(head, vec![0x61, 0xFF], 1000, Int::ONE, Int::ONE);
         push(&mut evm, &ctx(), &call(), &mut state()).unwrap();
         evm.apply(&mut state());
         assert_eq!(evm.stack.len(), 1);
@@ -136,7 +136,7 @@ mod tests {
     fn test_dup1() {
         let a = int(1);
         let head = Head::default();
-        let mut evm = Evm::new(head, vec![0x80], 1000, Int::ONE); // DUP1
+        let mut evm = Evm::new(head, vec![0x80], 1000, Int::ONE, Int::ONE); // DUP1
         evm.stack.push(a);
         dup(&mut evm, &ctx(), &call(), &mut state()).unwrap();
         evm.apply(&mut state());
@@ -148,7 +148,7 @@ mod tests {
     fn test_dup2() {
         let (a, b) = (int(1), int(2));
         let head = Head::default();
-        let mut evm = Evm::new(head, vec![0x81], 1000, Int::ONE); // DUP2
+        let mut evm = Evm::new(head, vec![0x81], 1000, Int::ONE, Int::ONE); // DUP2
         evm.stack.extend([a, b]);
         dup(&mut evm, &ctx(), &call(), &mut state()).unwrap();
         evm.apply(&mut state());
@@ -160,7 +160,7 @@ mod tests {
     fn test_dup16() {
         let vals: Vec<Int> = (1..=16).map(int).collect();
         let head = Head::default();
-        let mut evm = Evm::new(head, vec![0x8F], 1000, Int::ONE); // DUP16
+        let mut evm = Evm::new(head, vec![0x8F], 1000, Int::ONE, Int::ONE); // DUP16
         evm.stack.extend(vals.iter().copied());
         dup(&mut evm, &ctx(), &call(), &mut state()).unwrap();
         evm.apply(&mut state());
@@ -171,7 +171,7 @@ mod tests {
     #[test]
     fn test_dup_underflow() {
         let head = Head::default();
-        let mut evm = Evm::new(head, vec![0x81], 1000, Int::ONE); // DUP2, but only 1 item on stack
+        let mut evm = Evm::new(head, vec![0x81], 1000, Int::ONE, Int::ONE); // DUP2, but only 1 item on stack
         evm.stack.push(int(1));
         let result = dup(&mut evm, &ctx(), &call(), &mut state());
         assert!(is_halt(result, HaltReason::StackUnderflow));
@@ -180,7 +180,7 @@ mod tests {
     #[test]
     fn test_dup_empty() {
         let head = Head::default();
-        let mut evm = Evm::new(head, vec![0x80], 1000, Int::ONE); // DUP1 on empty stack
+        let mut evm = Evm::new(head, vec![0x80], 1000, Int::ONE, Int::ONE); // DUP1 on empty stack
         let result = dup(&mut evm, &ctx(), &call(), &mut state());
         assert!(is_halt(result, HaltReason::StackUnderflow));
     }
@@ -191,7 +191,7 @@ mod tests {
     fn test_swap1() {
         let (a, b) = (int(1), int(2));
         let head = Head::default();
-        let mut evm = Evm::new(head, vec![0x90], 1000, Int::ONE); // SWAP1
+        let mut evm = Evm::new(head, vec![0x90], 1000, Int::ONE, Int::ONE); // SWAP1
         evm.stack.extend([a, b]);
         swap(&mut evm, &ctx(), &call(), &mut state()).unwrap();
         evm.apply(&mut state());
@@ -203,7 +203,7 @@ mod tests {
     fn test_swap2() {
         let (a, b, c) = (int(1), int(2), int(3));
         let head = Head::default();
-        let mut evm = Evm::new(head, vec![0x91], 1000, Int::ONE); // SWAP2
+        let mut evm = Evm::new(head, vec![0x91], 1000, Int::ONE, Int::ONE); // SWAP2
         evm.stack.extend([a, b, c]);
         swap(&mut evm, &ctx(), &call(), &mut state()).unwrap();
         evm.apply(&mut state());
@@ -215,7 +215,7 @@ mod tests {
     fn test_swap16() {
         let vals: Vec<Int> = (1..=17).map(int).collect(); // need 17 items for SWAP16
         let head = Head::default();
-        let mut evm = Evm::new(head, vec![0x9F], 1000, Int::ONE); // SWAP16
+        let mut evm = Evm::new(head, vec![0x9F], 1000, Int::ONE, Int::ONE); // SWAP16
         evm.stack.extend(vals.iter().copied());
         swap(&mut evm, &ctx(), &call(), &mut state()).unwrap();
         evm.apply(&mut state());
@@ -226,7 +226,7 @@ mod tests {
     #[test]
     fn test_swap1_underflow_empty() {
         let head = Head::default();
-        let mut evm = Evm::new(head, vec![0x90], 1000, Int::ONE); // SWAP1 on empty stack
+        let mut evm = Evm::new(head, vec![0x90], 1000, Int::ONE, Int::ONE); // SWAP1 on empty stack
         let result = swap(&mut evm, &ctx(), &call(), &mut state());
         assert!(is_halt(result, HaltReason::StackUnderflow));
     }
@@ -234,7 +234,7 @@ mod tests {
     #[test]
     fn test_swap1_underflow_one() {
         let head = Head::default();
-        let mut evm = Evm::new(head, vec![0x90], 1000, Int::ONE); // SWAP1 needs 2, has 1
+        let mut evm = Evm::new(head, vec![0x90], 1000, Int::ONE, Int::ONE); // SWAP1 needs 2, has 1
         evm.stack.push(int(1));
         let result = swap(&mut evm, &ctx(), &call(), &mut state());
         eprintln!("RESULT: {result:?}");
@@ -244,7 +244,7 @@ mod tests {
     #[test]
     fn test_swap2_underflow() {
         let head = Head::default();
-        let mut evm = Evm::new(head, vec![0x91], 1000, Int::ONE); // SWAP2 needs 3, has 2
+        let mut evm = Evm::new(head, vec![0x91], 1000, Int::ONE, Int::ONE); // SWAP2 needs 3, has 2
         evm.stack.extend([int(1), int(2)]);
         let result = swap(&mut evm, &ctx(), &call(), &mut state());
         assert!(is_halt(result, HaltReason::StackUnderflow));

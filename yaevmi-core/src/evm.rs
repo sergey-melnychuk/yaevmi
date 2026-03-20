@@ -151,6 +151,7 @@ pub struct Evm {
     pub head: Head,
     pub ret: Vec<u8>,
 
+    pub chain_id: Int,
     pub gas_price: Int,
     pub(crate) pending_stack_pops: usize,
     pub(crate) pending_stack_push: Vec<Int>,
@@ -169,7 +170,7 @@ impl Evm {
     // Sanity check: (16 * 2^20) = 16Mb in practice.
     pub const MEMORY_SIZE_LIMIT: usize = (1_usize << 24);
 
-    pub fn new(head: Head, code: Vec<u8>, gas: u64, gas_price: Int) -> Self {
+    pub fn new(head: Head, code: Vec<u8>, gas: u64, chain_id: Int, gas_price: Int) -> Self {
         Self {
             pc: 0,
             gas: Gas::new(gas),
@@ -178,6 +179,7 @@ impl Evm {
             code,
             head,
             ret: Vec::new(),
+            chain_id,
             gas_price,
             pending_stack_pops: 0,
             pending_stack_push: Vec::new(),

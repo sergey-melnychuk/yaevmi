@@ -159,14 +159,14 @@ pub async fn run(
     }
 
     let mut ctx = Context::mainnet().with_db(db);
-    ctx.block.number = U256::from(head.number);
+    ctx.block.number = U256::from(head.number.as_u64());
     ctx.block.timestamp = to_u256(&head.timestamp);
     ctx.block.gas_limit = head.gas_limit.as_u64();
     ctx.block.beneficiary = to_addr(&head.coinbase);
     ctx.block.basefee = head.base_fee.as_u64();
     ctx.block.prevrandao = Some(to_b256(&head.prevrandao));
 
-    ctx.cfg.chain_id = head.chain_id as u64;
+    ctx.cfg.chain_id = tx.chain_id.as_u64();
     ctx.cfg.set_spec_and_mainnet_gas_params(SpecId::CANCUN);
 
     // For legacy tx (max_fee_per_gas=0), use gas_price for effective fee
@@ -193,7 +193,7 @@ pub async fn run(
         .gas_price(tx.gas_price.as_u128())
         .value(to_u256(&call.eth))
         .data(Bytes::from(call.data.0.clone()))
-        .nonce(tx.nonce.unwrap_or(0))
+        .nonce(tx.nonce.as_u64())
         .access_list(AccessList::from(
             tx.access_list
                 .iter()

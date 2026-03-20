@@ -321,7 +321,7 @@ impl State for Cache {
 
     fn head(&self, number: u64) -> Option<Head> {
         self.hash.get(&number).map(|&hash| Head {
-            number,
+            number: number.into(),
             hash,
             ..Head::default()
         })

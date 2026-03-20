@@ -3,7 +3,7 @@ use yaevmi_misc::buf::Buf;
 
 use crate::{
     Result,
-    call::{Head, Tx},
+    call::{Block, Head},
     evm::Fetch,
     state::{Account, State},
 };
@@ -17,7 +17,7 @@ pub trait Chain {
     async fn nonce(&self, acc: &Acc) -> eyre::Result<u64>;
     async fn balance(&self, acc: &Acc) -> eyre::Result<Int>;
     async fn head(&self, number: u64) -> eyre::Result<Head>;
-    async fn block(&self, number: u64) -> eyre::Result<(Head, Vec<Tx>)>;
+    async fn block(&self, number: u64) -> eyre::Result<Block>;
 }
 
 pub async fn fetch(f: Fetch, state: &mut impl State, chain: &impl Chain) -> Result<()> {

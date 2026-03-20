@@ -305,6 +305,7 @@ impl Executor {
             self.call.clone(),
             mode,
             None,
+            tx.chain_id.to(),
             effective_gas_price,
             state,
             chain,
@@ -615,6 +616,7 @@ impl Executor {
                         call.clone(),
                         mode,
                         Some(&this.ctx),
+                        tx.chain_id.to(),
                         self.effective_gas_price,
                         state,
                         chain,
@@ -767,12 +769,14 @@ impl Executor {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn prepare(
     head: Head,
     mut call: Call,
     mode: CallMode,
     ctx: Option<&Context>,
-    effective_gas_price: Int,
+    chain_id: Int,
+    gas_price: Int,
     state: &mut impl State,
     chain: &impl Chain,
 ) -> Result<CallFrame> {
@@ -788,7 +792,7 @@ async fn prepare(
         Buf::default()
     };
     // GASPRICE opcode returns effective gas price (EIP-1559: min(max_fee, base_fee + priority))
-    let evm = Evm::new(head, code.into_vec(), call.gas, effective_gas_price);
+    let evm = Evm::new(head, code.into_vec(), call.gas, chain_id, gas_price);
     let is_static = matches!(mode, CallMode::Static(_, _));
     let this = match mode {
         CallMode::Create(acc) => acc,

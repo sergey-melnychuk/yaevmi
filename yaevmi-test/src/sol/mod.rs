@@ -92,29 +92,29 @@ pub fn ethers(eth: i32) -> Int {
 
 pub fn head() -> Head {
     Head {
-        number: 1,
+        number: 1.into(),
         hash: int("0x1"),
         gas_limit: 10_000_000.into(),
         coinbase: acc("0xC014BA5E"),
         timestamp: 42.into(),
         base_fee: 1.into(),
-        blob_base_fee: 1.into(),
-        chain_id: 1,
-        blobhash: Int::ONE,
+        blob_base_fee: Some(1.into()),
+        blobhash: Some(Int::ONE),
         prevrandao: Int::ONE,
     }
 }
 
 pub fn tx(nonce: u64) -> Tx {
     Tx {
-        nonce: Some(nonce),
+        chain_id: 1.into(),
+        nonce: nonce.into(),
         gas_price: 1.into(),
         max_fee_per_gas: 1.into(),
         max_priority_fee_per_gas: 1.into(),
         access_list: vec![],
         authorization_list: vec![],
         blob_hashes: vec![],
-        max_fee_per_blob_gas: 1.into(),
+        max_fee_per_blob_gas: Some(1.into()),
     }
 }
 

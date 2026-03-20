@@ -34,35 +34,35 @@ impl<const N: usize> Hex<N> {
     pub fn as_usize(&self) -> usize {
         const K: usize = size_of::<usize>();
         let mut b = [0u8; K];
-        b.copy_from_slice(&self.0[N - K..]);
+        b.copy_from_slice(self.to::<K>().as_ref());
         usize::from_be_bytes(b)
     }
 
     pub fn as_u128(&self) -> u128 {
         const K: usize = size_of::<u128>();
         let mut b = [0u8; K];
-        b.copy_from_slice(&self.0[N - K..]);
+        b.copy_from_slice(self.to::<K>().as_ref());
         u128::from_be_bytes(b)
     }
 
     pub fn as_u64(&self) -> u64 {
         const K: usize = size_of::<u64>();
         let mut b = [0u8; K];
-        b.copy_from_slice(&self.0[N - K..]);
+        b.copy_from_slice(self.to::<K>().as_ref());
         u64::from_be_bytes(b)
     }
 
     pub fn as_u32(&self) -> u32 {
         const K: usize = size_of::<u32>();
         let mut b = [0u8; K];
-        b.copy_from_slice(&self.0[N - K..]);
+        b.copy_from_slice(self.to::<K>().as_ref());
         u32::from_be_bytes(b)
     }
 
     pub fn as_u16(&self) -> u16 {
         const K: usize = size_of::<u16>();
         let mut b = [0u8; K];
-        b.copy_from_slice(&self.0[N - K..]);
+        b.copy_from_slice(self.to::<K>().as_ref());
         u16::from_be_bytes(b)
     }
 
