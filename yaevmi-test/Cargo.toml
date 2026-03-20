@@ -13,9 +13,10 @@ yaevmi-base.workspace = true
 yaevmi-core.workspace = true
 yaevmi-misc.workspace = true
 
-[dev-dependencies]
-futures = "0.3"
-k256 = { version = "0.13", features = ["ecdsa"] }
-pretty_assertions = "1.4.1"
 revm = "36.0.0"
 tokio = { version = "1.50.0", features = ["full"] }
+futures = "0.3"
+
+[dev-dependencies]
+k256 = { version = "0.13", features = ["ecdsa"] }
+pretty_assertions = "1.4.1"
