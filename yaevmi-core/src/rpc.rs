@@ -4,7 +4,7 @@ use yaevmi_base::{Acc, Int};
 use yaevmi_misc::{buf::Buf, http::Http};
 
 use crate::{
-    call::{Block, Head},
+    call::{Block, Head, Receipt},
     chain::Chain,
     state::Account,
 };
@@ -31,6 +31,10 @@ impl Rpc {
     pub async fn chain_id(&self) -> eyre::Result<u32> {
         let chain_id: Int = call(&self.http, &self.url, "eth_chainId", &[]).await?;
         Ok(chain_id.as_u32())
+    }
+
+    pub async fn receipt(&self, hash: Int) -> eyre::Result<Receipt> {
+        receipt(&self.http, &self.url, hash).await
     }
 }
 
@@ -138,6 +142,17 @@ async fn latest(http: &Http, url: &str) -> eyre::Result<Head> {
     Ok(head)
 }
 
+async fn receipt(http: &Http, url: &str, hash: Int) -> eyre::Result<Receipt> {
+    let head = call(
+        http,
+        url,
+        "eth_getTransactionReceipt",
+        &[Value::String(hash.to_string())],
+    )
+    .await?;
+    Ok(head)
+}
+
 async fn call<R: DeserializeOwned>(
     http: &Http,
     url: &str,
@@ -178,6 +193,8 @@ async fn call<R: DeserializeOwned>(
 
 #[cfg(test)]
 mod tests {
+    use yaevmi_base::int;
+
     use super::*;
 
     #[tokio::test]
@@ -188,6 +205,15 @@ mod tests {
         let (number, hash) = (head.number.as_u64(), head.hash);
         assert_ne!(hash, Int::ZERO);
         assert!(number > 24697386);
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[ignore = "makes RPC call to a public node"]
+    async fn test_receipt() -> eyre::Result<()> {
+        let hash = int("0xd3aafbde18d85a863399c94ffec80af928bb3ebecc3685f1c784245deff04c04");
+        let http = Http::new();
+        let _ = receipt(&http, "https://ethereum-rpc.publicnode.com", hash).await?;
         Ok(())
     }
 }

@@ -126,7 +126,13 @@ impl<const N: usize> From<u8> for Hex<N> {
 
 impl<const N: usize> From<i32> for Hex<N> {
     fn from(value: i32) -> Self {
-        Self::from(value as u32)
+        Self::from(value.max(0) as u32)
+    }
+}
+
+impl<const N: usize> From<i64> for Hex<N> {
+    fn from(value: i64) -> Self {
+        Self::from(value.max(0) as u64)
     }
 }
 

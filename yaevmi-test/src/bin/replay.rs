@@ -1,6 +1,15 @@
 use alloy_provider::ProviderBuilder;
 use futures::{StreamExt, channel::mpsc};
-use yaevmi_core::{Call, Head, Tx, cache::Cache, chain::Chain, exe::Executor, rpc::Rpc};
+use yaevmi_core::{
+    Call, Head, Tx,
+    cache::Cache,
+    chain::Chain,
+    exe::{CallResult, Executor},
+    rpc::Rpc,
+};
+
+// TODO: 0x50f089afa2cff9c59634ec4973589697f3fe229b44108cf856f436cab0a710ee: "Signature expired" but yevm runs OK.
+// TODO: 0xcf41706dc2f05b3fd765fac52a1cc0c678f434b264b73cfac2c44f00cfe86ccf: EIP-7702 delegation fails on INVALID.
 
 /*
 cargo build --release --bin replay
@@ -21,6 +30,7 @@ async fn main() -> eyre::Result<()> {
         let call = tx.call.clone().into();
         (call, tx.tx.clone(), block.head)
     };
+    let hash = tx.hash;
     println!("Tx Hash: {}", tx.hash);
     println!("Tx Index: {}", tx.index.as_u64());
 
@@ -35,7 +45,6 @@ async fn main() -> eyre::Result<()> {
         loop {
             let y = yrx.next().await;
             let r = rrx.next().await;
-            // println!("(y, r): {:?}", (&y, &r));
             if let (Some(mut y), Some(mut r)) = (y, r) {
                 if y != r {
                     println!("===\nSTEP MISMATCH:\nYEVM: {y:#?}\nREVM: {r:#?}\n(skip: {skip})");
@@ -67,23 +76,35 @@ async fn main() -> eyre::Result<()> {
     });
 
     let mut exe = Executor::new(call);
-    let res = exe.run(tx, head, &mut cache, &rpc).await?;
+    let result = exe.run(tx, head, &mut cache, &rpc).await?;
 
     let _ = cache.sender.take();
 
-    // TODO: execute block with revm and yevm
-    // TODO: verify revm result state agains yevm
-
-    // TODO: find a way to stream traces from yevm and revm
-    // TODO: zip trace streams and compare them on the fly
-
     handle.await?;
-    println!("RESULT: {:#?}", res);
+    println!("RESULT: {:#?}", result);
+
+    let receipt = rpc.receipt(hash).await?;
+    let used_gas = receipt.gas_used.as_u64() as i64;
+    match result {
+        CallResult::Done {
+            status,
+            ret: _,
+            gas,
+        } => {
+            assert_eq!(gas.finalized, used_gas, "gas");
+            assert_eq!(status, receipt.status, "status");
+        }
+        CallResult::Created { acc, code: _, gas } => {
+            assert_eq!(gas.finalized, used_gas, "gas");
+            assert_eq!(Some(acc), receipt.contract_address, "created");
+        }
+    }
+    println!("OK: {hash}");
     Ok(())
 }
 
-// TODO: run embedded database for state storage (yakvdb?)
-// TODO: (consider: sqlite, leveldb, rocksdb, sled)
+// TODO: run embedded database for acc/state storage
+// consider: sqlite, leveldb, rocksdb, sled, yakvdb?
 
 // TODO: for each processed block: generate hermetic env
 // (containing all read storage cells by all transactions)
@@ -156,12 +177,6 @@ mod live {
                 step.debug.push(format!("SSTORE: key={key:0x}"));
                 step.debug.push(format!("SSTORE: val={val:0x}"));
             }
-
-            // let address = interp.input.target_address;
-            // if let Some(load) = ctx.sload(address, key) {
-            //     step.debug.push(format!("SSTORE: cur={:?}", load.data));
-            //     step.debug.push(format!("SSTORE: cold={}", load.is_cold));
-            // };
         }
 
         fn step_end(&mut self, interp: &mut Interpreter<EthInterpreter>, _ctx: &mut CTX) {
@@ -180,14 +195,6 @@ mod live {
                     step.debug.push(format!("refund={refund}"));
                 }
                 step.debug.push(format!("depth={}", self.depth));
-
-                // let target = interp.input.target_address;
-                // let balance = ctx
-                //     .balance(interp.input.target_address)
-                //     .map(|state| state.data)
-                //     .unwrap_or_default();
-                // step.debug.push(format!("balance[{target:?}]={balance:?}"));
-
                 if let Some(tx) = self.tx.as_mut() {
                     let _ = tx.try_send(step); // TODO: check for error
                 }
@@ -239,9 +246,7 @@ mod live {
         ctx.block.beneficiary = to_addr(&head.coinbase);
         ctx.block.basefee = head.base_fee.as_u64();
         ctx.block.prevrandao = Some(to_b256(&head.prevrandao));
-
         ctx.cfg.chain_id = tx.chain_id.as_u64();
-        // ctx.cfg.set_spec_and_mainnet_gas_params(SpecId::CANCUN);
 
         // For legacy tx (max_fee_per_gas=0), use gas_price for effective fee
         let max_fee = if tx.max_fee_per_gas.is_zero() {

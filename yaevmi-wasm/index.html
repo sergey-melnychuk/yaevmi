@@ -28,13 +28,14 @@
             const url = 'https://ethereum-rpc.publicnode.com';
             console.log('running against', url);
             const stream = await run(url);
+            var len = 0;
             let step;
             while ((step = await stream.next()) !== null) {
                 console.log(step);
+                len += 1;
             }
-            console.log('stream ended');
-            console.log('tx', stream.tx());
-            console.log('gas', stream.gas());
+            console.log('stream ended, len', len);
+            console.log(stream.check());
         } catch (e) {
             console.error('run failed', e);
         }

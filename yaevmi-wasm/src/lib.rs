@@ -1,13 +1,13 @@
-// #[cfg(target_arch = "wasm32")] // comment-out this line for development
+#[cfg(target_arch = "wasm32")] // comment-out this line for development
 mod wasm {
-    use js_sys::JsString;
-    use wasm_bindgen::prelude::*;
     use futures::StreamExt;
     use futures::channel::mpsc;
+    use js_sys::JsString;
+    use wasm_bindgen::prelude::*;
     use yaevmi_core::Int;
     use yaevmi_core::cache::Cache;
     use yaevmi_core::chain::Chain;
-    use yaevmi_core::exe::Executor;
+    use yaevmi_core::exe::{CallResult, Executor};
     use yaevmi_core::trace::Step;
     use yaevmi_core::{Call, Head, Tx, rpc::Rpc};
 
@@ -22,38 +22,14 @@ mod wasm {
         Ok(serde_wasm_bindgen::to_value(&call)?)
     }
 
-    // TODO: YAVMI: Executor, Call & Builder, Int/Acc/Buf, Tx/Head
-    /*
-    ```javascript
-    let call = {
-        by: '0x1',
-        to: '0x2',
-        eth: '0x3',
-        gas: 4,
-        data: '0x5'
-    };
-    let exe = new Executor(call);
-
-    let tx = {
-        // ...
-    };
-    let head = {
-        // ...
-    };
-    let state = new Cache();
-    let chain = new Rpc(URL);
-
-    let res = await exe.run(head, tx, state, chain);
-    // res.state - object with touched state
-    // res.steps - array of trace objects
-    ```
-    */
-
     #[wasm_bindgen]
     pub struct Stream {
         receiver: mpsc::Receiver<Step>,
-        gas: i32,
         tx: Int,
+        rcpt_gas: Int,
+        yevm_gas: Int,
+        rcpt_status: Int,
+        yevm_status: Int,
     }
 
     #[wasm_bindgen]
@@ -69,12 +45,35 @@ mod wasm {
             }
         }
 
-        pub fn gas(&self) -> i32 {
-            self.gas
-        }
-
-        pub fn tx(&self) -> JsString {
-            self.tx.to_string().into()
+        pub fn check(&self) -> JsString {
+            let gas_ok = self.yevm_gas == self.rcpt_gas;
+            let status_ok = self.yevm_status == self.rcpt_status;
+            [
+                format!("TX: {}", self.tx),
+                format!(
+                    "gas: yevm={} rcpt={}: OK={}",
+                    self.yevm_gas.as_u64(),
+                    self.rcpt_gas.as_u64(),
+                    gas_ok
+                ),
+                if self.rcpt_status > 2.into() {
+                    format!(
+                        "created: yevm={} rcpt={}: OK={}",
+                        self.yevm_status.to::<20>(),
+                        self.rcpt_status.to::<20>(),
+                        status_ok
+                    )
+                } else {
+                    format!(
+                        "status: yevm={} rcpt={}: OK={}",
+                        self.yevm_status.as_u8(),
+                        self.rcpt_status.as_u8(),
+                        status_ok
+                    )
+                },
+            ]
+            .join("\n")
+            .into()
         }
     }
 
@@ -95,14 +94,38 @@ mod wasm {
         };
         let hash = tx.hash;
 
-        let (ytx, yrx) = mpsc::channel(1024);
+        let (ytx, yrx) = mpsc::channel(1024 * 1024);
         let mut cache = Cache::with_sender(ytx);
 
         let mut exe = Executor::new(call);
-        let res = exe.run(tx, head, &mut cache, &rpc).await?;
+        let result = exe.run(tx, head, &mut cache, &rpc).await?;
         let _ = cache.sender.take();
 
-        Ok(Stream { receiver: yrx, gas: res.gas().finalized as i32, tx: hash })
+        let (yevm_status, yevm_gas) = match result {
+            CallResult::Done {
+                status,
+                ret: _,
+                gas,
+            } => (status, gas.finalized.into()),
+            CallResult::Created { acc, code: _, gas } => (acc.to(), gas.finalized.into()),
+        };
+        let receipt = rpc.receipt(hash).await?;
+        let (rcpt_status, rcpt_gas) = (
+            if let Some(acc) = receipt.contract_address {
+                acc.to()
+            } else {
+                receipt.status
+            },
+            receipt.gas_used,
+        );
+        Ok(Stream {
+            receiver: yrx,
+            tx: hash,
+            rcpt_gas,
+            yevm_gas,
+            rcpt_status,
+            yevm_status,
+        })
     }
 
     async fn release() {

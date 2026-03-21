@@ -385,6 +385,9 @@ pub mod tests {
         fn set_value(&mut self, _: &Acc, _: Int) -> Int {
             Int::ZERO
         }
+        fn set_code(&mut self, _: &Acc, _: Buf, _: Int) -> Int {
+            Int::ZERO
+        }
         fn acc_mut(&mut self, _: &Acc) -> &mut Account {
             &mut self.0
         }

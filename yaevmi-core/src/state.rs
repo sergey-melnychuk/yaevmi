@@ -19,6 +19,7 @@ pub trait State {
 
     fn inc_nonce(&mut self, acc: &Acc, nonce: Int) -> Int;
     fn set_value(&mut self, acc: &Acc, value: Int) -> Int;
+    fn set_code(&mut self, acc: &Acc, code: Buf, hash: Int) -> Int;
     fn set_auth(&mut self, src: &Acc, dst: &Acc);
 
     fn acc_mut(&mut self, acc: &Acc) -> &mut Account;

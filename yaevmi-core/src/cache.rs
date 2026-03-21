@@ -203,22 +203,19 @@ impl State for Cache {
         prev
     }
 
-    // fn set_code(&mut self, acc: &Acc, code: Buf, hash: Int) -> Int {
-    //     let prev = {
-    //         let entry = self.accounts.entry(*acc).or_default();
-    //         let prev = entry.account.value;
-    //         entry.account.value = value;
-    //         prev
-    //     };
-    //     self.emit(Event::Put(
-    //         Target::Value {
-    //             acc: *acc,
-    //             val: prev,
-    //         },
-    //         value,
-    //     ));
-    //     prev
-    // }
+    fn set_code(&mut self, acc: &Acc, _code: Buf, hash: Int) -> Int {
+        let prev = {
+            let entry = self.accounts.entry(*acc).or_default();
+            let (_, prev) = entry.account.code;
+            prev
+        };
+        self.emit(Event::Put(
+            Target::Code { acc: *acc, hash: prev },
+            hash,
+        ));
+        // TODO: use code cache for by-hash lookups
+        prev
+    }
 
     fn set_auth(&mut self, _src: &Acc, _dst: &Acc) {
         // TODO: insert EIP-7702 delegation

@@ -424,7 +424,7 @@ impl Executor {
                                 },
                                 hash,
                             ));
-                            state.acc_mut(&addr).code = (code, hash);
+                            state.acc_mut(&addr).code = (code, hash); // TODO: use state.set_code
                         }
                         let _ = this.evm.push(addr.to());
                         let return_gas = (gas.limit - gas.spent).max(0);
@@ -762,7 +762,7 @@ impl Executor {
             && !code.0.is_empty()
         {
             let hash = Int::from(keccak256(code.as_slice()).as_ref());
-            state.acc_mut(&addr).code = (code.clone(), hash);
+            state.acc_mut(&addr).code = (code.clone(), hash); // TODO: use state.set_code
         }
 
         let gas_final = finalized(&self.call, &tx, &head, effective_gas_price, &result, state);
@@ -790,7 +790,7 @@ async fn prepare(
     } else if let Some((code, _)) = state.code(&call.to) {
         code
     } else if let Ok((code, hash)) = chain.code(&call.to).await {
-        state.acc_mut(&call.to).code = (code.clone(), hash);
+        state.acc_mut(&call.to).code = (code.clone(), hash); // TODO: use state.set_code
         code
     } else {
         Buf::default()
