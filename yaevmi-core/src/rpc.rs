@@ -4,7 +4,7 @@ use yaevmi_base::{Acc, Int};
 use yaevmi_misc::{buf::Buf, http::Http};
 
 use crate::{
-    call::{Block, Head, Receipt},
+    call::{Block, Head, Receipt, TxFull},
     chain::Chain,
     state::Account,
 };
@@ -19,18 +19,50 @@ pub struct Rpc {
 impl Rpc {
     pub async fn latest(url: String) -> eyre::Result<Self> {
         let http = Http::new();
-        let head: Head = latest(&http, &url).await?;
+        let head = head(&http, &url, "latest".into()).await?;
         Ok(Self {
             url,
             http,
-            block_number: head.number.as_u64() - 1,
-            block_hash: head.parent_hash,
+            block_number: head.number.as_u64(),
+            block_hash: head.hash,
         })
+    }
+
+    pub async fn number(url: String, number: u64) -> eyre::Result<Self> {
+        let http = Http::new();
+        let head = head(&http, &url, format!("0x{:x}", number)).await?;
+        Ok(Self {
+            url,
+            http,
+            block_number: head.number.as_u64(),
+            block_hash: head.hash,
+        })
+    }
+
+    pub async fn reset(&mut self, number: u64) -> eyre::Result<Head> {
+        let head = head(&self.http, &self.url, format!("0x{:x}", number)).await?;
+        self.block_number = head.number.as_u64();
+        self.block_hash = head.hash;
+        Ok(head)
     }
 
     pub async fn chain_id(&self) -> eyre::Result<u32> {
         let chain_id: Int = call(&self.http, &self.url, "eth_chainId", &[]).await?;
         Ok(chain_id.as_u32())
+    }
+
+    pub async fn lookup(&self, block: u64, index: u64) -> eyre::Result<TxFull> {
+        let tx = call::<TxFull>(
+            &self.http,
+            &self.url,
+            "eth_getTransactionByBlockNumberAndIndex",
+            &[
+                Value::String(format!("0x{block:x}")),
+                Value::String(format!("0x{index:x}")),
+            ],
+        )
+        .await?;
+        Ok(tx)
     }
 
     pub async fn receipt(&self, hash: Int) -> eyre::Result<Receipt> {
@@ -131,12 +163,12 @@ impl Chain for Rpc {
     }
 }
 
-async fn latest(http: &Http, url: &str) -> eyre::Result<Head> {
+async fn head(http: &Http, url: &str, arg: String) -> eyre::Result<Head> {
     let head = call(
         http,
         url,
         "eth_getBlockByNumber",
-        &[Value::String("latest".to_string()), Value::Bool(false)],
+        &[Value::String(arg), Value::Bool(false)],
     )
     .await?;
     Ok(head)
@@ -201,7 +233,12 @@ mod tests {
     #[ignore = "makes RPC call to a public node"]
     async fn test_latest() -> eyre::Result<()> {
         let http = Http::new();
-        let head = latest(&http, "https://ethereum-rpc.publicnode.com").await?;
+        let head = head(
+            &http,
+            "https://ethereum-rpc.publicnode.com",
+            "latest".to_string(),
+        )
+        .await?;
         let (number, hash) = (head.number.as_u64(), head.hash);
         assert_ne!(hash, Int::ZERO);
         assert!(number > 24697386);

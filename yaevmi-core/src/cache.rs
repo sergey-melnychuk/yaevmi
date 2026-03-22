@@ -210,7 +210,10 @@ impl State for Cache {
             prev
         };
         self.emit(Event::Put(
-            Target::Code { acc: *acc, hash: prev },
+            Target::Code {
+                acc: *acc,
+                hash: prev,
+            },
             hash,
         ));
         // TODO: use code cache for by-hash lookups

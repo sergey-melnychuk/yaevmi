@@ -277,6 +277,7 @@ impl Executor {
         if let Some(acc) = state.acc(&self.call.by)
             && !acc.code.0.0.is_empty()
         {
+            // TODO: check for EIP-7702 delegation (code)
             return Err(Error::SenderNotEOA);
         }
 

@@ -1,15 +1,17 @@
 use alloy_provider::ProviderBuilder;
 use futures::{StreamExt, channel::mpsc};
+use yaevmi_base::int;
 use yaevmi_core::{
-    Call, Head, Tx,
+    Call,
     cache::Cache,
     chain::Chain,
     exe::{CallResult, Executor},
     rpc::Rpc,
 };
 
+// TODO: 0xcf41706dc2f05b3fd765fac52a1cc0c678f434b264b73cfac2c44f00cfe86ccf: EIP-7702
+// TODO: 0xb283062d05a29d6b09a6c903c1ef6bdc82732a852a6ab51a9224110b4ad4e744: EIP-4844
 // TODO: 0x50f089afa2cff9c59634ec4973589697f3fe229b44108cf856f436cab0a710ee: "Signature expired" but yevm runs OK.
-// TODO: 0xcf41706dc2f05b3fd765fac52a1cc0c678f434b264b73cfac2c44f00cfe86ccf: EIP-7702 delegation fails on INVALID.
 // TODO: 0x86b27d44f2c337470e3aa6bc77550940937fe7cd44b656fe468566db4ec9632b: yevm fails but onchain tx succeeds.
 
 /*
@@ -18,23 +20,52 @@ cargo build --release --bin replay
 */
 #[tokio::main]
 async fn main() -> eyre::Result<()> {
-    // TODO: replay tx hash, replay block:index
     dotenv::dotenv().ok();
-    let url = std::env::var("YAEVMI_RPC_URL").unwrap();
-    let rpc = Rpc::latest(url.clone()).await?;
+    let Ok(url) = std::env::var("YAEVMI_RPC_URL") else {
+        eyre::bail!("Missing YAEVMI_RPC_URL");
+    };
+    let mut rpc = Rpc::latest(url.clone()).await?;
+
+    let (block, tx, head) = {
+        let arg = std::env::args()
+            .nth(1)
+            .unwrap_or_else(|| String::from("latest:0"));
+
+        if arg.starts_with("0x") {
+            let hash = int(&arg); // TODO: handle invalid hex
+            let receipt = rpc.receipt(hash).await?;
+            let block = receipt.block_number.as_u64();
+            let index = receipt.transaction_index.as_u64();
+            let tx = rpc.lookup(block, index).await?;
+            let head = rpc.head(block).await?;
+            (block, tx, head)
+        } else if arg.contains(":") {
+            let mut split = arg.split(":");
+            let block = split.next().unwrap();
+            let block: u64 = if block == "latest" {
+                rpc.block_number
+            } else {
+                block.parse().unwrap()
+            };
+            let index: u64 = split.next().unwrap().parse().unwrap();
+            let tx = rpc.lookup(block, index).await?;
+            let head = rpc.head(block).await?;
+            (block, tx, head)
+        } else {
+            eyre::bail!("Unexpected arg: '{arg}'.\nExpected: '0x<hash>' or '<block>:<index>'.");
+        }
+    };
+    rpc.reset(block - 1).await?;
+
     println!("Chain ID: {}", rpc.chain_id().await?);
     println!("Block Hash: {}", rpc.block_hash);
     println!("Block Number: {}", rpc.block_number);
 
-    let (call, tx, head): (Call, Tx, Head) = {
-        let block = rpc.block(rpc.block_number + 1).await?;
-        let tx = &block.txs[0];
-        let call = tx.call.clone().into();
-        (call, tx.tx.clone(), block.head)
-    };
-    let hash = tx.hash;
-    println!("Tx Hash: {}", tx.hash);
-    println!("Tx Index: {}", tx.index.as_u64());
+    let hash = tx.tx.hash;
+    let call: Call = tx.call.into();
+    let tx = tx.tx.clone();
+    println!("Tx Hash:  {}", tx.hash);
+    println!("Tx Index: {}", tx.index);
 
     let (ytx, mut yrx) = mpsc::channel(1024 * 1024);
     let mut cache = Cache::with_sender(ytx);
@@ -42,7 +73,10 @@ async fn main() -> eyre::Result<()> {
     let (rtx, mut rrx) = mpsc::channel(1024 * 1024);
 
     let handle = tokio::spawn(async move {
-        println!("---\nSTREAMING OPENED");
+        let is_trace = std::env::var("TRACE").is_ok();
+        if is_trace {
+            println!("---\nSTREAMING OPENED");
+        }
         let mut skip = 0;
         loop {
             let y = yrx.next().await;
@@ -52,16 +86,20 @@ async fn main() -> eyre::Result<()> {
                     println!("===\nSTEP MISMATCH:\nYEVM: {y:#?}\nREVM: {r:#?}\n(skip: {skip})");
                     break;
                 }
-                for line in r.debug.drain(..) {
-                    y.debug.push(format!("REVM: {line}"));
+                if is_trace {
+                    for line in r.debug.drain(..) {
+                        y.debug.push(format!("REVM: {line}"));
+                    }
+                    println!("{y:#?}");
                 }
-                println!("{y:#?}");
                 skip += 1;
             } else {
                 break;
             }
         }
-        println!("STREAMING CLOSED\n---");
+        if is_trace {
+            println!("STREAMING CLOSED [{skip} items]\n---");
+        }
     });
 
     let pack = (call.clone(), tx.clone(), head.clone());

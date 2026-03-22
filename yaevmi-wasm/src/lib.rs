@@ -11,6 +11,28 @@ mod wasm {
     use yaevmi_core::trace::Step;
     use yaevmi_core::{Call, Head, Tx, rpc::Rpc};
 
+    #[derive(Debug, thiserror::Error)]
+    #[error("{0}")]
+    pub struct Error(eyre::Report);
+
+    impl From<eyre::Report> for Error {
+        fn from(e: eyre::Report) -> Self {
+            Self(e)
+        }
+    }
+
+    impl From<yaevmi_core::Error> for Error {
+    fn from(e: yaevmi_core::Error) -> Self {
+            Self(e.into())
+        }
+    }
+
+    impl From<Error> for JsValue {
+        fn from(e: Error) -> Self {
+            JsValue::from(JsError::new(&e.0.to_string()))
+        }
+    }
+
     #[wasm_bindgen]
     pub fn hello(name: JsString) -> JsString {
         JsString::from(format!("Hello, {name}").as_str())
@@ -78,21 +100,16 @@ mod wasm {
     }
 
     #[wasm_bindgen]
-    pub async fn run(url: JsString) -> Result<Stream, JsError> {
-        run_inner(url)
-            .await
-            .map_err(|e| JsError::new(&e.to_string()))
-    }
-
-    async fn run_inner(url: JsString) -> eyre::Result<Stream> {
-        let rpc = Rpc::latest(url.into()).await?;
+    pub async fn run(url: JsString) -> Result<Stream, Error> {
+        let mut rpc = Rpc::latest(url.into()).await?;
         let (call, tx, head): (Call, Tx, Head) = {
-            let block = rpc.block(rpc.block_number + 1).await?;
+            let block = rpc.block(rpc.block_number).await?;
             let tx = &block.txs[0];
             let call = tx.call.clone().into();
             (call, tx.tx.clone(), block.head)
         };
         let hash = tx.hash;
+        rpc.reset(rpc.block_number - 1).await?;
 
         let (ytx, yrx) = mpsc::channel(1024 * 1024);
         let mut cache = Cache::with_sender(ytx);
