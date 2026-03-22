@@ -57,14 +57,17 @@ mod wasm {
     #[wasm_bindgen]
     impl Stream {
         pub async fn next(&mut self) -> JsValue {
-            match self.receiver.next().await {
+            release().await;
+            let result = match self.receiver.next().await {
                 Some(step) => {
                     let value = serde_wasm_bindgen::to_value(&step).unwrap_or(JsValue::NULL);
-                    release().await; // yield to JS event loop for smoothiness
+                    release().await;
                     value
                 }
                 None => JsValue::NULL,
-            }
+            };
+            release().await;
+            result
         }
 
         pub fn check(&self) -> JsString {

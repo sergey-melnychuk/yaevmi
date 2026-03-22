@@ -15,6 +15,8 @@ use yaevmi_core::{
 // TODO: 0x50f089afa2cff9c59634ec4973589697f3fe229b44108cf856f436cab0a710ee: wrong gas
 // TODO: 0x86b27d44f2c337470e3aa6bc77550940937fe7cd44b656fe468566db4ec9632b: wrong gas
 
+const YAEVMI_RPC_URL: &str = "YAEVMI_RPC_URL";
+
 /*
 cargo build --release --bin replay
 ./target/release/replay >replay.log 2>&1
@@ -22,8 +24,8 @@ cargo build --release --bin replay
 #[tokio::main]
 async fn main() -> eyre::Result<()> {
     dotenv::dotenv().ok();
-    let Ok(url) = std::env::var("YAEVMI_RPC_URL") else {
-        eyre::bail!("Missing YAEVMI_RPC_URL");
+    let Ok(url) = std::env::var(YAEVMI_RPC_URL) else {
+        eyre::bail!("{YAEVMI_RPC_URL} not set");
     };
     let mut rpc = Rpc::latest(url.clone()).await?;
 
