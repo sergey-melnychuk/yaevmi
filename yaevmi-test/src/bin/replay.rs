@@ -1,6 +1,7 @@
 use std::time::Instant;
 
 use alloy_provider::ProviderBuilder;
+use eyre::OptionExt;
 use futures::{StreamExt, channel::mpsc};
 use yaevmi_base::int;
 use yaevmi_core::{
@@ -10,6 +11,7 @@ use yaevmi_core::{
     exe::{CallResult, Executor},
     rpc::Rpc,
 };
+use yaevmi_misc::hex::parse_vec;
 
 // TODO: 0xcf41706dc2f05b3fd765fac52a1cc0c678f434b264b73cfac2c44f00cfe86ccf: EIP-7702
 // TODO: 0xb283062d05a29d6b09a6c903c1ef6bdc82732a852a6ab51a9224110b4ad4e744: EIP-4844
@@ -37,26 +39,32 @@ async fn main() -> eyre::Result<()> {
             .unwrap_or_else(|| String::from("latest"));
 
         if arg.starts_with("0x") {
-            let hash = int(&arg); // TODO: handle invalid hex
+            if parse_vec(&arg).is_err() {
+                eyre::bail!("Invalid hex literal: {arg}");
+            }
+            let hash = int(&arg);
             let receipt = rpc.receipt(hash).await?;
             let block = receipt.block_number.as_u64();
             let index = receipt.transaction_index.as_u64();
             (block, Some(index as usize))
         } else if arg.contains(":") {
             let mut split = arg.split(":");
-            let block = split.next().unwrap(); // TODO: unwrap -> readable error
+            let block = split.next()
+                .ok_or_eyre("invalid block:index format")?;
             let block: u64 = if block == "latest" {
                 rpc.block_number
             } else {
-                block.parse().unwrap()
+                block.parse()?
             };
-            let index: usize = split.next().unwrap().parse().unwrap(); // TODO: unwrap -> readable error
+            let index: usize = split.next()
+                .ok_or_eyre("invalid block:index format")?
+                .parse()?;
             (block, Some(index))
         } else {
             let block: u64 = if arg == "latest" {
                 rpc.block_number
             } else {
-                arg.parse().unwrap() // TODO: unwrap -> readable error
+                arg.parse()?
             };
             (block, None)
         }
@@ -68,12 +76,6 @@ async fn main() -> eyre::Result<()> {
     println!("Chain ID: {}", chain_id);
     println!("Block Hash: {}", rpc.block_hash);
     println!("Block Number: {}", rpc.block_number);
-
-    // let hash = tx.tx.hash;
-    // let call: Call = tx.call.into();
-    // let tx = tx.tx.clone();
-    // println!("Tx Hash:  {}", tx.hash);
-    // println!("Tx Index: {}", tx.index);
 
     let (ytx, mut yrx) = mpsc::channel(1024 * 1024);
     let mut cache = Cache::with_sender(ytx);
@@ -113,7 +115,7 @@ async fn main() -> eyre::Result<()> {
     let txs = rpc.block(head.number.as_u64()).await?.txs;
     let pack = (txs.clone(), head.clone(), index);
 
-    let provider = ProviderBuilder::new().connect(&url).await.unwrap();
+    let provider = ProviderBuilder::new().connect(&url).await?;
     tokio::task::spawn_blocking(move || {
         let (txs, head, index) = pack;
         if let Some(i) = index {
