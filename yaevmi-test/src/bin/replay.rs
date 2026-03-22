@@ -1,9 +1,11 @@
+use std::time::Instant;
+
 use alloy_provider::ProviderBuilder;
 use futures::{StreamExt, channel::mpsc};
 use yaevmi_base::int;
 use yaevmi_core::{
-    Call,
     cache::Cache,
+    call::Receipt,
     chain::Chain,
     exe::{CallResult, Executor},
     rpc::Rpc,
@@ -29,46 +31,49 @@ async fn main() -> eyre::Result<()> {
     };
     let mut rpc = Rpc::latest(url.clone()).await?;
 
-    let (block, tx, head) = {
+    let (block, index) = {
         let arg = std::env::args()
             .nth(1)
-            .unwrap_or_else(|| String::from("latest:0"));
+            .unwrap_or_else(|| String::from("latest"));
 
         if arg.starts_with("0x") {
             let hash = int(&arg); // TODO: handle invalid hex
             let receipt = rpc.receipt(hash).await?;
             let block = receipt.block_number.as_u64();
             let index = receipt.transaction_index.as_u64();
-            let tx = rpc.lookup(block, index).await?;
-            let head = rpc.head(block).await?;
-            (block, tx, head)
+            (block, Some(index as usize))
         } else if arg.contains(":") {
             let mut split = arg.split(":");
-            let block = split.next().unwrap();
+            let block = split.next().unwrap(); // TODO: unwrap -> readable error
             let block: u64 = if block == "latest" {
                 rpc.block_number
             } else {
                 block.parse().unwrap()
             };
-            let index: u64 = split.next().unwrap().parse().unwrap();
-            let tx = rpc.lookup(block, index).await?;
-            let head = rpc.head(block).await?;
-            (block, tx, head)
+            let index: usize = split.next().unwrap().parse().unwrap(); // TODO: unwrap -> readable error
+            (block, Some(index))
         } else {
-            eyre::bail!("Unexpected arg: '{arg}'.\nExpected: '0x<hash>' or '<block>:<index>'.");
+            let block: u64 = if arg == "latest" {
+                rpc.block_number
+            } else {
+                arg.parse().unwrap() // TODO: unwrap -> readable error
+            };
+            (block, None)
         }
     };
+    let head = rpc.head(block).await?;
     rpc.reset(block - 1).await?;
 
-    println!("Chain ID: {}", rpc.chain_id().await?);
+    let chain_id = rpc.chain_id().await?;
+    println!("Chain ID: {}", chain_id);
     println!("Block Hash: {}", rpc.block_hash);
     println!("Block Number: {}", rpc.block_number);
 
-    let hash = tx.tx.hash;
-    let call: Call = tx.call.into();
-    let tx = tx.tx.clone();
-    println!("Tx Hash:  {}", tx.hash);
-    println!("Tx Index: {}", tx.index);
+    // let hash = tx.tx.hash;
+    // let call: Call = tx.call.into();
+    // let tx = tx.tx.clone();
+    // println!("Tx Hash:  {}", tx.hash);
+    // println!("Tx Index: {}", tx.index);
 
     let (ytx, mut yrx) = mpsc::channel(1024 * 1024);
     let mut cache = Cache::with_sender(ytx);
@@ -105,28 +110,77 @@ async fn main() -> eyre::Result<()> {
         }
     });
 
-    let pack = (call.clone(), tx.clone(), head.clone());
+    let txs = rpc.block(head.number.as_u64()).await?.txs;
+    let pack = (txs.clone(), head.clone(), index);
 
-    let provider = ProviderBuilder::new()
-        // .connect("https://mainnet.infura.io/v3/c60b0bb42f8a4c6481ecd229eddaca27")
-        .connect(&url)
-        .await
-        .unwrap();
-
+    let provider = ProviderBuilder::new().connect(&url).await.unwrap();
     tokio::task::spawn_blocking(move || {
-        let (call, tx, head) = pack;
-        let _ = live::run(call, tx, head, rtx, provider);
+        let (txs, head, index) = pack;
+        if let Some(i) = index {
+            let tx = &txs[i];
+            let (call, tx) = (tx.call.clone().into(), tx.tx.clone());
+            let _ = live::run_one(call, tx, head, rtx, provider);
+        } else {
+            let _ = live::run_all(chain_id, &txs, head, rtx, provider);
+        }
     });
 
-    let mut exe = Executor::new(call);
-    let result = exe.run(tx, head, &mut cache, &rpc).await?;
+    let txs = if let Some(i) = index {
+        vec![txs[i].clone()]
+    } else {
+        txs
+    };
+
+    let n = txs.len();
+    let mut ok = 0;
+    let mut gas_total = 0;
+    let mut ms_total = 0;
+    for (i, tx) in txs.into_iter().enumerate() {
+        let hash = tx.tx.hash;
+        let (tx, call) = (tx.tx.clone(), tx.call.into());
+        let mut exe = Executor::new(call);
+        let now = Instant::now();
+        let result = exe.run(tx, head.clone(), &mut cache, &rpc).await?;
+        let ms = now.elapsed().as_millis();
+        let gas = result.gas().finalized;
+        let fetches = exe.fetches;
+        let fetching = exe.fetching.as_millis();
+        let receipt = rpc.receipt(hash).await?;
+
+        let violations = check(result, receipt);
+        if violations.is_empty() {
+            gas_total += gas;
+            ms_total += ms - fetching;
+            println!(
+                "{hash}: OK [{}/{n}, {gas} gas, {ms}ms/{}ms, fetches:{fetches}/{fetching}ms]",
+                i + 1,
+                ms - fetching
+            );
+            ok += 1;
+        } else {
+            println!(
+                "{hash}: FAIL: [{}/{n}, {ms}ms/{}ms, fetches:{fetches}/{fetching}ms]\n{}",
+                i + 1,
+                ms - fetching,
+                violations.join("\n")
+            );
+        }
+    }
+    if n > 1 {
+        println!("{ok}/{n} OK");
+    }
+    println!(
+        "{gas_total} gas, {ms_total}ms: ~{:.2} gas/sec",
+        gas_total as f64 * 1000.0 / ms_total as f64
+    );
 
     let _ = cache.sender.take();
-
     handle.await?;
-    println!("RESULT: {:#?}", result);
+    Ok(())
+}
 
-    let receipt = rpc.receipt(hash).await?;
+fn check(result: CallResult, receipt: Receipt) -> Vec<String> {
+    let mut ret = Vec::new();
     let used_gas = receipt.gas_used.as_u64() as i64;
     match result {
         CallResult::Done {
@@ -134,16 +188,31 @@ async fn main() -> eyre::Result<()> {
             ret: _,
             gas,
         } => {
-            assert_eq!(gas.finalized, used_gas, "gas");
-            assert_eq!(status, receipt.status, "status");
+            if status != receipt.status {
+                ret.push(format!(
+                    " ok: have {} want {}",
+                    status.as_u8(),
+                    receipt.status.as_u8()
+                ));
+            }
+            if gas.finalized != used_gas {
+                ret.push(format!("gas: have {} want {}", gas.finalized, used_gas));
+            }
         }
         CallResult::Created { acc, code: _, gas } => {
-            assert_eq!(gas.finalized, used_gas, "gas");
-            assert_eq!(Some(acc), receipt.contract_address, "created");
+            if Some(acc) != receipt.contract_address {
+                ret.push(format!(
+                    "new: have {} want {}",
+                    acc,
+                    receipt.contract_address.unwrap_or_default()
+                ));
+            }
+            if gas.finalized != used_gas {
+                ret.push(format!("gas: have {} want {}", gas.finalized, used_gas));
+            }
         }
     }
-    println!("OK: {hash}");
-    Ok(())
+    ret
 }
 
 // TODO: run embedded database for acc/state storage
@@ -165,10 +234,11 @@ mod live {
     use revm::interpreter::{CallInputs, CallOutcome, CreateInputs, CreateOutcome};
     use revm::interpreter::{Interpreter, interpreter::EthInterpreter};
     use revm::primitives::{Address, B256, Bytes, TxKind, U256};
-    use revm::{Context, InspectEvm, Inspector, MainBuilder, MainContext};
+    use revm::{Context, ExecuteCommitEvm, InspectEvm, Inspector, MainBuilder, MainContext};
 
     use futures::channel::mpsc;
     use yaevmi_base::{Acc, Int};
+    use yaevmi_core::call::TxFull;
     use yaevmi_core::trace::Step;
     use yaevmi_core::{Call, Head, Tx};
     use yaevmi_misc::buf::Buf;
@@ -267,7 +337,93 @@ mod live {
         }
     }
 
-    pub fn run(
+    pub fn run_all(
+        chain_id: u64,
+        txs: &[TxFull],
+        head: Head,
+        sender: mpsc::Sender<Step>,
+        provider: impl Provider + Clone,
+    ) -> eyre::Result<()> {
+        let to_addr = |a: &Acc| Address::from(<[u8; 20]>::try_from(a.as_ref()).unwrap());
+        let to_u256 = |i: &Int| U256::from_be_bytes(<[u8; 32]>::try_from(i.as_ref()).unwrap());
+        let to_b256 = |i: &Int| B256::from(<[u8; 32]>::try_from(i.as_ref()).unwrap());
+
+        let db = AlloyDB::new(provider, BlockId::from(to_b256(&head.parent_hash)));
+        let db = WrapDatabaseAsync::new(db).unwrap();
+        let db = CacheDB::new(db);
+
+        let mut ctx = Context::mainnet().with_db(db);
+        ctx.block.number = U256::from(head.number.as_u64());
+        ctx.block.timestamp = to_u256(&head.timestamp);
+        ctx.block.gas_limit = head.gas_limit.as_u64();
+        ctx.block.beneficiary = to_addr(&head.coinbase);
+        ctx.block.basefee = head.base_fee.as_u64();
+        ctx.block.prevrandao = Some(to_b256(&head.prevrandao));
+        ctx.cfg.chain_id = chain_id;
+
+        let inspector = Tracer {
+            tx: Some(sender),
+            ..Tracer::default()
+        };
+        let mut evm = ctx.build_mainnet_with_inspector(inspector);
+
+        for tx in txs {
+            let (tx, call): (Tx, Call) = (tx.tx.clone(), tx.call.clone().into());
+            // For legacy tx (max_fee_per_gas=0), use gas_price for effective fee
+            let max_fee = if tx.max_fee_per_gas.is_zero() {
+                tx.gas_price.as_u128()
+            } else {
+                tx.max_fee_per_gas.as_u128()
+            };
+            let priority_fee = if tx.max_fee_per_gas.is_zero() {
+                tx.gas_price.as_u128()
+            } else {
+                tx.max_priority_fee_per_gas.as_u128()
+            };
+
+            let kind = if call.is_create() {
+                TxKind::Create
+            } else {
+                TxKind::Call(to_addr(&call.to))
+            };
+            let tx = TxEnv::builder()
+                .caller(to_addr(&call.by))
+                .kind(kind)
+                .gas_limit(call.gas)
+                .gas_price(tx.gas_price.as_u128())
+                .value(to_u256(&call.eth))
+                .data(Bytes::from(call.data.0.clone()))
+                .nonce(tx.nonce.as_u64())
+                .access_list(AccessList::from(
+                    tx.access_list
+                        .iter()
+                        .map(|item| AccessListItem {
+                            address: to_addr(&item.address),
+                            storage_keys: item
+                                .storage_keys
+                                .iter()
+                                .map(to_b256)
+                                .collect::<Vec<B256>>(),
+                        })
+                        .collect::<Vec<AccessListItem>>(),
+                ))
+                .max_fee_per_gas(max_fee)
+                .gas_priority_fee(Some(priority_fee))
+                .authorization_list(vec![])
+                .blob_hashes(vec![])
+                .max_fee_per_blob_gas(Int::ZERO.as_u128())
+                .build()
+                .map_err(|e| eyre::eyre!("{e:?}"))?;
+
+            let ExecResultAndState { result: _, state } = evm.inspect_tx(tx)?;
+            evm.commit(state);
+        }
+        let _ = evm.inspector.tx.take();
+        Ok(())
+    }
+
+    #[allow(dead_code)]
+    pub fn run_one(
         call: Call,
         tx: Tx,
         head: Head,

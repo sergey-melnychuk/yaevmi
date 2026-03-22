@@ -22,7 +22,7 @@ mod wasm {
     }
 
     impl From<yaevmi_core::Error> for Error {
-    fn from(e: yaevmi_core::Error) -> Self {
+        fn from(e: yaevmi_core::Error) -> Self {
             Self(e.into())
         }
     }

@@ -124,7 +124,7 @@ pub struct Head {
 pub struct Tx {
     #[serde(default)]
     #[serde(skip_serializing_if = "Hex::is_zero")]
-    pub chain_id: Hex<4>,
+    pub chain_id: Hex<8>,
     pub nonce: Int,
     pub gas_price: Int,
     #[serde(default)]

@@ -46,9 +46,9 @@ impl Rpc {
         Ok(head)
     }
 
-    pub async fn chain_id(&self) -> eyre::Result<u32> {
+    pub async fn chain_id(&self) -> eyre::Result<u64> {
         let chain_id: Int = call(&self.http, &self.url, "eth_chainId", &[]).await?;
-        Ok(chain_id.as_u32())
+        Ok(chain_id.as_u64())
     }
 
     pub async fn lookup(&self, block: u64, index: u64) -> eyre::Result<TxFull> {

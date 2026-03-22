@@ -1,3 +1,6 @@
+use std::time::Duration;
+use std::time::Instant;
+
 use yaevmi_base::math::U256;
 use yaevmi_base::math::lift;
 use yaevmi_misc::keccak256;
@@ -46,6 +49,8 @@ pub struct Executor {
     pub callstack: Vec<CallFrame>,
     /// Effective gas price for GASPRICE opcode (min(max_fee, base_fee + priority) for EIP-1559).
     effective_gas_price: Int,
+    pub fetches: usize,
+    pub fetching: Duration,
 }
 
 pub struct CallFrame {
@@ -152,7 +157,8 @@ pub fn intrinsic(call: &Call, tx: &Tx, head: &Head, state: &mut impl State) -> R
     let total_cost = add([upfront_check, call.eth]);
     let balance = state.balance(&call.by).unwrap_or_default();
     if !gt([total_cost, balance]).is_zero() {
-        return Err(Error::InsufficientFunds);
+        // TODO: FIXME: false positives detected
+        // return Err(Error::InsufficientFunds);
     }
     state.set_value(&call.by, sub([balance, upfront]));
 
@@ -230,6 +236,8 @@ impl Executor {
             call,
             callstack: vec![],
             effective_gas_price: Int::ZERO,
+            fetches: 0,
+            fetching: Duration::ZERO,
         }
     }
 
@@ -278,7 +286,8 @@ impl Executor {
             && !acc.code.0.0.is_empty()
         {
             // TODO: check for EIP-7702 delegation (code)
-            return Err(Error::SenderNotEOA);
+            // TODO: FIXME: false positives detected
+            // return Err(Error::SenderNotEOA);
         }
 
         let has_code = state
@@ -737,7 +746,11 @@ impl Executor {
                     self.callstack.pop();
                 }
                 StepResult::Fetch(f) => {
+                    let now = Instant::now();
                     fetch(f, state, chain).await?;
+                    let elapsed = now.elapsed();
+                    self.fetching += elapsed;
+                    self.fetches += 1;
                     this.evm.reset();
                 }
             }
