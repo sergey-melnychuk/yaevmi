@@ -10,6 +10,7 @@ use yaevmi_core::{
 
 // TODO: 0x50f089afa2cff9c59634ec4973589697f3fe229b44108cf856f436cab0a710ee: "Signature expired" but yevm runs OK.
 // TODO: 0xcf41706dc2f05b3fd765fac52a1cc0c678f434b264b73cfac2c44f00cfe86ccf: EIP-7702 delegation fails on INVALID.
+// TODO: 0x86b27d44f2c337470e3aa6bc77550940937fe7cd44b656fe468566db4ec9632b: yevm fails but onchain tx succeeds.
 
 /*
 cargo build --release --bin replay
@@ -17,6 +18,7 @@ cargo build --release --bin replay
 */
 #[tokio::main]
 async fn main() -> eyre::Result<()> {
+    // TODO: replay tx hash, replay block:index
     dotenv::dotenv().ok();
     let url = std::env::var("YAEVMI_RPC_URL").unwrap();
     let rpc = Rpc::latest(url.clone()).await?;
