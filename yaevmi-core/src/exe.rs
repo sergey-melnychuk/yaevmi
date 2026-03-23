@@ -1,6 +1,3 @@
-use std::time::Duration;
-use std::time::Instant;
-
 use yaevmi_base::math::U256;
 use yaevmi_base::math::lift;
 use yaevmi_misc::keccak256;
@@ -50,7 +47,9 @@ pub struct Executor {
     /// Effective gas price for GASPRICE opcode (min(max_fee, base_fee + priority) for EIP-1559).
     effective_gas_price: Int,
     pub fetches: usize,
-    pub fetching: Duration,
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fetching: std::time::Duration,
 }
 
 pub struct CallFrame {
@@ -64,18 +63,30 @@ pub struct CallFrame {
     pub stipend: i64,
 }
 
-pub fn intrinsic(call: &Call, tx: &Tx, head: &Head, state: &mut impl State) -> Result<(i64, Int)> {
+pub fn intrinsic(
+    call: &Call,
+    tx: &Tx,
+    head: &Head,
+    state: &mut impl State,
+) -> Result<(i64, i64, Int)> {
     let mut total = 21_000i64;
+    let mut floor = 21_000i64;
     let has_code = state.code(&call.to).is_some_and(|(c, _)| !c.0.is_empty());
     let is_create = call.is_create() && !has_code;
     if is_create {
         total += 32_000;
+        floor += 32_000;
         // EIP-3860: 2 gas per 32-byte word of initcode
-        total += 2 * ((call.data.0.len() as i64 + 31) / 32);
+        let initcode_cost = 2 * ((call.data.0.len() as i64 + 31) / 32);
+        total += initcode_cost;
+        floor += initcode_cost;
     }
     let zeroes = call.data.0.iter().filter(|b| **b == 0).count();
     let non_zeroes = call.data.0.len() - zeroes;
     total += (zeroes * 4 + non_zeroes * 16) as i64;
+    // EIP-7623: floor calldata cost (TOTAL_COST_FLOOR_PER_TOKEN = 10)
+    let tokens = (zeroes + non_zeroes * 4) as i64;
+    floor += 10 * tokens;
 
     // EIP-2929: pre-warm sender, target, coinbase, and precompile addresses.
     // For CREATE (to==0x0) there is no target; do not warm 0x0.
@@ -95,7 +106,9 @@ pub fn intrinsic(call: &Call, tx: &Tx, head: &Head, state: &mut impl State) -> R
         .iter()
         .map(|item| (item.address, &item.storage_keys))
     {
-        total += 2_400 + 1_900 * keys.len() as i64;
+        let al_cost = 2_400 + 1_900 * keys.len() as i64;
+        total += al_cost;
+        floor += al_cost;
         state.warm_acc(&acc);
         for key in keys {
             state.warm_key(&acc, key);
@@ -163,8 +176,10 @@ pub fn intrinsic(call: &Call, tx: &Tx, head: &Head, state: &mut impl State) -> R
     state.set_value(&call.by, sub([balance, upfront]));
 
     // EIP-7702: authorization list gas (25000/auth tuple)
-    total += 25_000 * tx.authorization_list.len() as i64;
-    Ok((total, effective_gas_price))
+    let auth_cost = 25_000 * tx.authorization_list.len() as i64;
+    total += auth_cost;
+    floor += auth_cost;
+    Ok((total, floor, effective_gas_price))
 }
 
 pub fn finalized(
@@ -174,12 +189,14 @@ pub fn finalized(
     effective_gas_price: Int,
     result: &CallResult,
     state: &mut impl State,
+    floor: i64,
 ) -> i64 {
     // Settle gas: return unused gas to sender; coinbase receives the priority fee tip.
     let gas = result.gas();
 
     let effective_refund = gas.refund.min(gas.spent / 5);
-    let final_gas = (gas.spent - effective_refund).max(0) as u64;
+    // EIP-7623: floor gas cost for calldata-heavy transactions
+    let final_gas = (gas.spent - effective_refund).max(0).max(floor) as u64;
     let returned_gas = (gas.limit.max(0) as u64).saturating_sub(final_gas);
     let mul = lift(|[a, b]| a * b);
     let sub = lift(|[a, b]| a - b);
@@ -237,7 +254,9 @@ impl Executor {
             callstack: vec![],
             effective_gas_price: Int::ZERO,
             fetches: 0,
-            fetching: Duration::ZERO,
+
+            #[cfg(not(target_arch = "wasm32"))]
+            fetching: std::time::Duration::ZERO,
         }
     }
 
@@ -283,16 +302,16 @@ impl Executor {
 
         // EIP-3607: sender must be an EOA (no code)
         if let Some(acc) = state.acc(&self.call.by)
-            && !acc.code.0.0.is_empty()
+            && !(state.auth(&self.call.by).is_some() || acc.code.0.0.is_empty())
         {
-            // TODO: check for EIP-7702 delegation (code)
-            // TODO: FIXME: false positives detected
+            // TODO: FIXME: false positives
             // return Err(Error::SenderNotEOA);
         }
 
         let has_code = state
             .code(&self.call.to)
-            .is_some_and(|(c, _)| !c.0.is_empty());
+            .is_some_and(|(c, _)| !c.0.is_empty())
+            && state.auth(&self.call.to).is_none();
 
         let mode = if self.call.is_create() && !has_code {
             let nonce = state.nonce(&self.call.by).unwrap_or_default();
@@ -302,7 +321,7 @@ impl Executor {
             CallMode::Call(0, 0)
         };
 
-        let (intrinsic, effective_gas_price) = intrinsic(&self.call, &tx, &head, state)?;
+        let (intrinsic, floor, effective_gas_price) = intrinsic(&self.call, &tx, &head, state)?;
         self.effective_gas_price = effective_gas_price;
         if (self.call.gas as i64) < intrinsic {
             return Err(Error::GasTooLow {
@@ -340,8 +359,15 @@ impl Executor {
                     ret: vec![].into(),
                     gas,
                 };
-                let gas_final =
-                    finalized(&self.call, &tx, &head, effective_gas_price, &result, state);
+                let gas_final = finalized(
+                    &self.call,
+                    &tx,
+                    &head,
+                    effective_gas_price,
+                    &result,
+                    state,
+                    floor,
+                );
                 let mut result = result;
                 result.gas_mut().finalized = gas_final;
                 state.apply();
@@ -746,10 +772,18 @@ impl Executor {
                     self.callstack.pop();
                 }
                 StepResult::Fetch(f) => {
-                    let now = Instant::now();
+                    // TODO: FIXME: exclude time-related stuff for wasm32 target
+                    #[cfg(not(target_arch = "wasm32"))]
+                    let now = std::time::Instant::now();
+
                     fetch(f, state, chain).await?;
-                    let elapsed = now.elapsed();
-                    self.fetching += elapsed;
+
+                    #[cfg(not(target_arch = "wasm32"))]
+                    {
+                        let elapsed = now.elapsed();
+                        self.fetching += elapsed;
+                    }
+
                     self.fetches += 1;
                     this.evm.reset();
                 }
@@ -779,7 +813,15 @@ impl Executor {
             state.acc_mut(&addr).code = (code.clone(), hash); // TODO: use state.set_code
         }
 
-        let gas_final = finalized(&self.call, &tx, &head, effective_gas_price, &result, state);
+        let gas_final = finalized(
+            &self.call,
+            &tx,
+            &head,
+            effective_gas_price,
+            &result,
+            state,
+            floor,
+        );
         result.gas_mut().finalized = gas_final;
 
         state.apply();
@@ -799,12 +841,15 @@ async fn prepare(
     chain: &impl Chain,
 ) -> Result<CallFrame> {
     let is_create = matches!(mode, CallMode::Create(_) | CallMode::Create2(_));
+    let to = state.auth(&call.to).unwrap_or(call.to);
+    call.to = to; // apply EIP-7702 delegation
     let code = if is_create {
         std::mem::take(&mut call.data)
     } else if let Some((code, _)) = state.code(&call.to) {
         code
-    } else if let Ok((code, hash)) = chain.code(&call.to).await {
-        state.acc_mut(&call.to).code = (code.clone(), hash); // TODO: use state.set_code
+    } else if let Ok(account) = chain.acc(&call.to).await {
+        let code = account.code.0.clone();
+        *state.acc_mut(&call.to) = account;
         code
     } else {
         Buf::default()

@@ -15,9 +15,7 @@ use yaevmi_misc::hex::parse_vec;
 
 // TODO: 0xcf41706dc2f05b3fd765fac52a1cc0c678f434b264b73cfac2c44f00cfe86ccf: EIP-7702
 // TODO: 0xb283062d05a29d6b09a6c903c1ef6bdc82732a852a6ab51a9224110b4ad4e744: EIP-4844
-
-// TODO: 0x50f089afa2cff9c59634ec4973589697f3fe229b44108cf856f436cab0a710ee: wrong gas
-// TODO: 0x86b27d44f2c337470e3aa6bc77550940937fe7cd44b656fe468566db4ec9632b: wrong gas
+// TODO: 24716734: 124/127 OK
 
 const YAEVMI_RPC_URL: &str = "YAEVMI_RPC_URL";
 
@@ -32,6 +30,7 @@ async fn main() -> eyre::Result<()> {
         eyre::bail!("{YAEVMI_RPC_URL} not set");
     };
     let mut rpc = Rpc::latest(url.clone()).await?;
+    let chain_id = rpc.chain_id().await?;
 
     let (block, index) = {
         let arg = std::env::args()
@@ -49,14 +48,14 @@ async fn main() -> eyre::Result<()> {
             (block, Some(index as usize))
         } else if arg.contains(":") {
             let mut split = arg.split(":");
-            let block = split.next()
-                .ok_or_eyre("invalid block:index format")?;
+            let block = split.next().ok_or_eyre("invalid block:index format")?;
             let block: u64 = if block == "latest" {
                 rpc.block_number
             } else {
                 block.parse()?
             };
-            let index: usize = split.next()
+            let index: usize = split
+                .next()
                 .ok_or_eyre("invalid block:index format")?
                 .parse()?;
             (block, Some(index))
@@ -70,12 +69,8 @@ async fn main() -> eyre::Result<()> {
         }
     };
     let head = rpc.head(block).await?;
+    println!("Block: {} / {}", head.number.as_u64(), head.hash);
     rpc.reset(block - 1).await?;
-
-    let chain_id = rpc.chain_id().await?;
-    println!("Chain ID: {}", chain_id);
-    println!("Block Hash: {}", rpc.block_hash);
-    println!("Block Number: {}", rpc.block_number);
 
     let (ytx, mut yrx) = mpsc::channel(1024 * 1024);
     let mut cache = Cache::with_sender(ytx);
@@ -138,30 +133,36 @@ async fn main() -> eyre::Result<()> {
     let mut gas_total = 0;
     let mut ms_total = 0;
     for (i, tx) in txs.into_iter().enumerate() {
+        if std::env::var("TRACE").is_ok() {
+            println!("{}", serde_json::to_string_pretty(&tx).unwrap());
+        }
+
         let hash = tx.tx.hash;
         let (tx, call) = (tx.tx.clone(), tx.call.into());
         let mut exe = Executor::new(call);
         let now = Instant::now();
+        cache.reset();
         let result = exe.run(tx, head.clone(), &mut cache, &rpc).await?;
         let ms = now.elapsed().as_millis();
         let gas = result.gas().finalized;
         let fetches = exe.fetches;
         let fetching = exe.fetching.as_millis();
         let receipt = rpc.receipt(hash).await?;
+        let ty = receipt.r#type.as_u8();
 
         let violations = check(result, receipt);
         if violations.is_empty() {
             gas_total += gas;
             ms_total += ms - fetching;
             println!(
-                "{hash}: OK [{}/{n}, {gas} gas, {ms}ms/{}ms, fetches:{fetches}/{fetching}ms]",
+                "{hash} [type:{ty}]: OK [{}/{n}, {gas} gas, {ms}ms/{}ms, fetches:{fetches}/{fetching}ms]",
                 i + 1,
                 ms - fetching
             );
             ok += 1;
         } else {
             println!(
-                "{hash}: FAIL: [{}/{n}, {ms}ms/{}ms, fetches:{fetches}/{fetching}ms]\n{}",
+                "{hash} [type:{ty}]: FAIL: [{}/{n}, {ms}ms/{}ms, fetches:{fetches}/{fetching}ms]\n{}",
                 i + 1,
                 ms - fetching,
                 violations.join("\n")
@@ -171,10 +172,12 @@ async fn main() -> eyre::Result<()> {
     if n > 1 {
         println!("{ok}/{n} OK");
     }
-    println!(
-        "{gas_total} gas, {ms_total}ms: ~{:.2} gas/sec",
-        gas_total as f64 * 1000.0 / ms_total as f64
-    );
+    if gas_total > 0 && ms_total > 0 {
+        println!(
+            "{gas_total} gas, {ms_total}ms: ~{:.2} gas/sec",
+            gas_total as f64 * 1000.0 / ms_total as f64
+        );
+    }
 
     let _ = cache.sender.take();
     handle.await?;

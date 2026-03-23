@@ -100,6 +100,24 @@ impl Cache {
     pub fn storage(&self, addr: &Acc, key: &Int) -> Option<Int> {
         self.accounts.get(addr)?.storage.get(key).map(|s| s.current)
     }
+
+    pub fn reset(&mut self) {
+        self.transient.clear();
+        self.warm_accs.clear();
+        self.warm_keys.clear();
+        self.created.clear();
+        self.destroyed.clear();
+        self.depth = 0;
+        self.logs.clear();
+        self.events.clear();
+
+        // TODO: FIXME: re-work original slot value tracking to avoid this
+        for (_, account) in self.accounts.iter_mut() {
+            for (_, slot) in account.storage.iter_mut() {
+                slot.original = slot.current;
+            }
+        }
+    }
 }
 
 impl State for Cache {
@@ -203,10 +221,11 @@ impl State for Cache {
         prev
     }
 
-    fn set_code(&mut self, acc: &Acc, _code: Buf, hash: Int) -> Int {
+    fn set_code(&mut self, acc: &Acc, code: Buf, hash: Int) -> Int {
         let prev = {
             let entry = self.accounts.entry(*acc).or_default();
             let (_, prev) = entry.account.code;
+            entry.account.code = (code, hash);
             prev
         };
         self.emit(Event::Put(
@@ -220,8 +239,11 @@ impl State for Cache {
         prev
     }
 
-    fn set_auth(&mut self, _src: &Acc, _dst: &Acc) {
-        // TODO: insert EIP-7702 delegation
+    fn set_auth(&mut self, src: &Acc, dst: &Acc) {
+        let mut code = vec![0; 23];
+        code.extend_from_slice(&[0xFE, 0x10, 0x00]);
+        code.extend_from_slice(dst.as_ref());
+        self.set_code(src, code.into(), Int::ZERO);
     }
 
     fn acc_mut(&mut self, acc: &Acc) -> &mut Account {
@@ -329,8 +351,14 @@ impl State for Cache {
         self.hash.insert(number, hash);
     }
 
-    fn auth(&self, _acc: &Acc) -> Option<Acc> {
-        None // TODO: lookup EIP-7702 delegation
+    fn auth(&self, acc: &Acc) -> Option<Acc> {
+        let entry = self.accounts.get(acc)?;
+        let (code, _) = &entry.account.code;
+        if code.0.len() == 23 && code.0.starts_with(&[0xEF, 0x10, 0x00]) {
+            Some(Acc::from(&code.0[3..]))
+        } else {
+            None
+        }
     }
 
     fn log(&mut self, data: Buf, topics: Vec<Int>) {
