@@ -354,7 +354,7 @@ impl State for Cache {
     fn auth(&self, acc: &Acc) -> Option<Acc> {
         let entry = self.accounts.get(acc)?;
         let (code, _) = &entry.account.code;
-        if code.0.len() == 23 && code.0.starts_with(&[0xEF, 0x10, 0x00]) {
+        if code.0.len() == 23 && code.0.starts_with(&[0xEF, 0x01, 0x00]) {
             Some(Acc::from(&code.0[3..]))
         } else {
             None

@@ -13,7 +13,6 @@ use yaevmi_core::{
 };
 use yaevmi_misc::hex::parse_vec;
 
-// TODO: 0xcf41706dc2f05b3fd765fac52a1cc0c678f434b264b73cfac2c44f00cfe86ccf: EIP-7702
 // TODO: 0xb283062d05a29d6b09a6c903c1ef6bdc82732a852a6ab51a9224110b4ad4e744: EIP-4844
 // TODO: 24716734: 124/127 OK
 

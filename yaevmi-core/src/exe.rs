@@ -841,8 +841,6 @@ async fn prepare(
     chain: &impl Chain,
 ) -> Result<CallFrame> {
     let is_create = matches!(mode, CallMode::Create(_) | CallMode::Create2(_));
-    let to = state.auth(&call.to).unwrap_or(call.to);
-    call.to = to; // apply EIP-7702 delegation
     let code = if is_create {
         std::mem::take(&mut call.data)
     } else if let Some((code, _)) = state.code(&call.to) {
@@ -853,6 +851,21 @@ async fn prepare(
         code
     } else {
         Buf::default()
+    };
+    // EIP-7702: resolve delegation after code is loaded
+    let code = if let Some(delegate) = state.auth(&call.to) {
+        call.to = delegate;
+        if let Some((code, _)) = state.code(&delegate) {
+            code
+        } else if let Ok(account) = chain.acc(&delegate).await {
+            let code = account.code.0.clone();
+            *state.acc_mut(&delegate) = account;
+            code
+        } else {
+            Buf::default()
+        }
+    } else {
+        code
     };
     // GASPRICE opcode returns effective gas price (EIP-1559: min(max_fee, base_fee + priority))
     let evm = Evm::new(head, code.into_vec(), call.gas, chain_id, gas_price);
