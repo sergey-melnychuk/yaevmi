@@ -74,8 +74,8 @@ pub const OPS: [(&str, Handler); 256] = [
     ("SHL", basic::shl),
     ("SHR", basic::shr),
     ("SAR", basic::sar),
-    // ("CLZ", basic::clz),
-    ("INVALID/0x1E", invalid), // not in Cancun spec
+    ("CLZ", basic::clz), // TODO: FIXME: make it work for live & test
+    // ("INVALID/0x1E", invalid), // CLZ is not in the Cancun spec
     ("INVALID/0x1F", invalid),
     // 0x20
     ("KECCAK256", basic::hash),
