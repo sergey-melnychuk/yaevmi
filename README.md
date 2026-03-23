@@ -51,28 +51,3 @@ python3 -m http.server
 
 2. [EVM.codes](https://www.evm.codes/)
 
-## etc
-
-Day 12 of development from scratch, first successfully replayed (stats & gas match) transaction: [0x8b4707ad1d5abc025a2f55174cd41ea3d6c84a9ae1a43852cf3be5b247827a0b](https://etherscan.io/tx/0x8b4707ad1d5abc025a2f55174cd41ea3d6c84a9ae1a43852cf3be5b247827a0b).
-
-```
-## cp .env.example .env
-## cargo build --release --bin replay
-$ ./target/release/replay >replay.log 2>&1
-$ cat replay.log
-Chain ID: 1
-Block Hash: 0x879bc2da5a7805399d94a498c25889e64d381e4069d9f90d173427593902e66d
-Block Number: 24697973
-Tx Hash: 0x8b4707ad1d5abc025a2f55174cd41ea3d6c84a9ae1a43852cf3be5b247827a0b
-Tx Index: 0
-Result: Done {
-    status: 0x0000000000000000000000000000000000000000000000000000000000000001,
-    ret: 0x0000000000000000000000000000000000000000000000000000000000000001,
-    gas: Gas {
-        limit: 107586,
-        spent: 45160,
-        refund: 0,
-        finalized: 45160,
-    },
-}
-```
