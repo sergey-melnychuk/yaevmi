@@ -241,8 +241,8 @@ impl State for Cache {
 
     fn set_auth(&mut self, src: &Acc, dst: &Acc) {
         let mut code = vec![0; 23];
-        code.extend_from_slice(&[0xFE, 0x10, 0x00]);
-        code.extend_from_slice(dst.as_ref());
+        code[..3].copy_from_slice(&[0xFE, 0x10, 0x00]);
+        code[3..].copy_from_slice(dst.as_ref());
         self.set_code(src, code.into(), Int::ZERO);
     }
 
@@ -355,7 +355,12 @@ impl State for Cache {
         let entry = self.accounts.get(acc)?;
         let (code, _) = &entry.account.code;
         if code.0.len() == 23 && code.0.starts_with(&[0xEF, 0x01, 0x00]) {
-            Some(Acc::from(&code.0[3..]))
+            let acc = Acc::from(&code.0[3..]);
+            if acc.is_zero() {
+                None
+            } else {
+                Some(acc)
+            }
         } else {
             None
         }

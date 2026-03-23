@@ -66,6 +66,13 @@ pub fn call(evm: &mut Evm, ctx: &Context, _: &Call, state: &mut dyn State) -> Ev
     if state.acc(&ctx.this).is_none() {
         return Err(EvmYield::Fetch(Fetch::Account(ctx.this)));
     }
+    if state.acc(&address).is_none() {
+        return Err(EvmYield::Fetch(Fetch::Account(address)));
+    }
+    if let Some(delegate) = state.auth(&address)
+        && state.acc(&address).is_none() {
+            return Err(EvmYield::Fetch(Fetch::Account(delegate)));
+        }
 
     // EIP-2929: warm/cold address access (use pending warm to survive Fetch+reset)
     let access_cost: i64 = if state.is_cold_acc(&address) {
@@ -75,6 +82,16 @@ pub fn call(evm: &mut Evm, ctx: &Context, _: &Call, state: &mut dyn State) -> Ev
     };
     evm.warm_acc(&address);
     evm.gas_charge(access_cost)?;
+
+    if let Some(delegate) = state.auth(&address) {
+        let access_cost: i64 = if state.is_cold_acc(&delegate) {
+            2600
+        } else {
+            100
+        };
+        evm.warm_acc(&delegate);
+        evm.gas_charge(access_cost)?;
+    };
 
     // Value transfer cost
     let has_value = !value.is_zero();
@@ -143,12 +160,17 @@ pub fn callcode(evm: &mut Evm, ctx: &Context, _: &Call, state: &mut dyn State) -
     let (args_offset, args_size) = (args_offset.as_usize(), args_size.as_usize());
     let (ret_offset, ret_size) = (ret_offset.as_usize(), ret_size.as_usize());
     let address: Acc = address.to();
+
     let is_precompile = is_precompile(&address);
     // Address 0 has no account but can be called (empty code returns success)
     let needs_account = address != Acc::ZERO && !is_precompile;
     if needs_account && state.acc(&address).is_none() {
         return Err(EvmYield::Fetch(Fetch::Account(address)));
     };
+    if let Some(delegate) = state.auth(&address)
+        && state.acc(&address).is_none() {
+            return Err(EvmYield::Fetch(Fetch::Account(delegate)));
+        }
 
     let access_cost: i64 = if state.is_cold_acc(&address) {
         2600
@@ -157,6 +179,16 @@ pub fn callcode(evm: &mut Evm, ctx: &Context, _: &Call, state: &mut dyn State) -
     };
     evm.warm_acc(&address);
     evm.gas_charge(access_cost)?;
+
+    if let Some(delegate) = state.auth(&address) {
+        let access_cost: i64 = if state.is_cold_acc(&delegate) {
+            2600
+        } else {
+            100
+        };
+        evm.warm_acc(&delegate);
+        evm.gas_charge(access_cost)?;
+    };
 
     evm.mem_expand_max(&[(args_offset, args_size), (ret_offset, ret_size)])?;
 
@@ -217,12 +249,17 @@ pub fn delegatecall(
     let (args_offset, args_size) = (args_offset.as_usize(), args_size.as_usize());
     let (ret_offset, ret_size) = (ret_offset.as_usize(), ret_size.as_usize());
     let address: Acc = address.to();
+
     let is_precompile = is_precompile(&address);
     // Address 0 has no account but can be called (empty code returns success)
     let needs_account = address != Acc::ZERO && !is_precompile;
     if needs_account && state.acc(&address).is_none() {
         return Err(EvmYield::Fetch(Fetch::Account(address)));
     };
+    if let Some(delegate) = state.auth(&address)
+        && state.acc(&address).is_none() {
+            return Err(EvmYield::Fetch(Fetch::Account(delegate)));
+        }
 
     let access_cost: i64 = if state.is_cold_acc(&address) {
         2600
@@ -231,6 +268,16 @@ pub fn delegatecall(
     };
     evm.warm_acc(&address);
     evm.gas_charge(access_cost)?;
+
+    if let Some(delegate) = state.auth(&address) {
+        let access_cost: i64 = if state.is_cold_acc(&delegate) {
+            2600
+        } else {
+            100
+        };
+        evm.warm_acc(&delegate);
+        evm.gas_charge(access_cost)?;
+    };
 
     evm.mem_expand_max(&[(args_offset, args_size), (ret_offset, ret_size)])?;
 
@@ -303,6 +350,15 @@ pub fn staticcall(evm: &mut Evm, ctx: &Context, _: &Call, state: &mut dyn State)
     let address: Acc = address.to();
     let is_precompile = is_precompile(&address);
 
+    let needs_account = address != Acc::ZERO && !is_precompile;
+    if needs_account && state.acc(&address).is_none() {
+        return Err(EvmYield::Fetch(Fetch::Account(address)));
+    };
+    if let Some(delegate) = state.auth(&address)
+        && state.acc(&address).is_none() {
+            return Err(EvmYield::Fetch(Fetch::Account(delegate)));
+        }
+
     // EIP-2929: warm/cold address access (applies to precompiles too)
     let access_cost: i64 = if state.is_cold_acc(&address) {
         2600
@@ -311,6 +367,16 @@ pub fn staticcall(evm: &mut Evm, ctx: &Context, _: &Call, state: &mut dyn State)
     };
     evm.warm_acc(&address);
     evm.gas_charge(access_cost)?;
+
+    if let Some(delegate) = state.auth(&address) {
+        let access_cost: i64 = if state.is_cold_acc(&delegate) {
+            2600
+        } else {
+            100
+        };
+        evm.warm_acc(&delegate);
+        evm.gas_charge(access_cost)?;
+    };
 
     // Fetch before mem_expand_max so expansion/charge survive reset
     if !is_precompile && state.acc(&address).is_none() {

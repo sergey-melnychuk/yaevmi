@@ -492,7 +492,6 @@ impl Evm {
                             step.memory = self.memory.len();
                             step.debug
                                 .push(format!("CALL:to={},gas={}", call.to, call.gas));
-                            // step.debug.push(format!("CALL:data={}", call.data));
                             state.emit(Event::Step(step));
                         }
                         StepResult::Call(call, mode)

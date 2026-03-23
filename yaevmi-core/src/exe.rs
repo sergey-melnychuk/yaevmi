@@ -241,7 +241,7 @@ pub fn transfer(call: &Call, mode: &CallMode, state: &mut impl State) {
         let add = lift(|[a, b]| a + b);
         let by0 = state.balance(&call.by).unwrap_or_default();
         state.set_value(&call.by, sub([by0, call.eth]));
-        let to = state.auth(&call.to).unwrap_or(call.to);
+        let to = call.to;
         let to0 = state.balance(&to).unwrap_or_default();
         state.set_value(&to, add([to0, call.eth]));
     }
@@ -705,7 +705,7 @@ impl Executor {
                         // CALLCODE: value stays with self (by == this), no actual transfer
                         // CALL: value goes from caller to callee
                         if matches!(mode, CallMode::Call(..)) {
-                            let to = state.auth(&call.to).unwrap_or(call.to);
+                            let to = call.to;
                             let add = lift(|[a, b]| a + b);
                             let sub = lift(|[a, b]| a - b);
                             let to0 = state.balance(&to).unwrap_or_default();
@@ -857,7 +857,6 @@ async fn prepare(
     };
     // EIP-7702: resolve delegation after code is loaded
     let code = if let Some(delegate) = state.auth(&call.to) {
-        call.to = delegate;
         if let Some((code, _)) = state.code(&delegate) {
             code
         } else if let Ok(account) = chain.acc(&delegate).await {
