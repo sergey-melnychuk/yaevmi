@@ -2,43 +2,58 @@
 <html>
 <head></head>
 <body>
+    <input id="rpc-url" type="url" value="https://ethereum-rpc.publicnode.com" />
+    <button id="btn-run">click</button>
     <p>see console</p>
     <script type="module">
         import init, { hello, call, run } from './pkg/yaevmi_wasm.js';
         await init();
 
-        console.log(hello('world'));
-
-        let ret = call({
-            by: '0x1',
-            to: '0x2',
-            eth: '0x3',
-            gas: 4,
-            data: '0x5'
-        });
-        console.log(ret);
-
-        try {
-            call('computer says no');
-        } catch (e) {
-            console.error('failed to parse Call', e);
-        }
-
-        try {
-            const url = 'https://ethereum-rpc.publicnode.com';
-            console.log('running against', url);
-            const stream = await run(url);
-            var len = 0;
-            let step;
-            while ((step = await stream.next()) !== null) {
-                console.log(step);
-                len += 1;
+        var url = "";
+        var running = false;
+        async function main() {
+            if (running) {
+                return;
             }
-            console.log('stream ended, len', len);
-            console.log(stream.check());
-        } catch (e) {
-            console.error('run failed', e);
+            running = true;
+            console.log(hello('world'));
+
+            let ret = call({
+                by: '0x1',
+                to: '0x2',
+                eth: '0x3',
+                gas: 4,
+                data: '0x5'
+            });
+            console.log(ret);
+
+            try {
+                call('computer says no');
+            } catch (e) {
+                console.error('failed to parse Call', e);
+            }
+
+            try {
+                console.log('running against', url);
+                const stream = await run(url);
+                var len = 0;
+                let step;
+                while ((step = await stream.next()) !== null) {
+                    console.log(step);
+                    len += 1;
+                }
+                console.log('stream ended, len', len);
+                console.log(stream.check());
+            } catch (e) {
+                console.error('run failed', e);
+            }
+            running = false;
         }
+
+        document.getElementById("btn-run").onclick = main;
+        url = document.getElementById("rpc-url").value;
+        console.log(url);
+        await main();
     </script>
 </body>
 </html>
