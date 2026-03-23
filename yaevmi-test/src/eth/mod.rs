@@ -145,7 +145,7 @@ pub fn build_call_tx(tc: &TestCase, idx: &dto::Indexes) -> (Call, Tx) {
                 })
                 .unwrap_or_default(),
             authorization_list: vec![],
-            blob_hashes: vec![],
+            blob_versioned_hashes: vec![],
             max_fee_per_blob_gas: Some(Int::ZERO),
             hash: Int::ZERO,
             index: Int::ZERO,

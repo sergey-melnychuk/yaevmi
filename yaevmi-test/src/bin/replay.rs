@@ -13,9 +13,6 @@ use yaevmi_core::{
 };
 use yaevmi_misc::hex::parse_vec;
 
-// TODO: 0xb283062d05a29d6b09a6c903c1ef6bdc82732a852a6ab51a9224110b4ad4e744: EIP-4844
-// TODO: 24716734: 124/127 OK
-
 const YAEVMI_RPC_URL: &str = "YAEVMI_RPC_URL";
 
 /*
@@ -414,8 +411,15 @@ mod live {
                 .max_fee_per_gas(max_fee)
                 .gas_priority_fee(Some(priority_fee))
                 .authorization_list(vec![])
-                .blob_hashes(vec![])
-                .max_fee_per_blob_gas(Int::ZERO.as_u128())
+                .blob_hashes(
+                    tx.blob_versioned_hashes
+                        .iter()
+                        .map(to_b256)
+                        .collect::<Vec<B256>>(),
+                )
+                .max_fee_per_blob_gas(
+                    tx.max_fee_per_blob_gas.unwrap_or_default().as_u128(),
+                )
                 .build()
                 .map_err(|e| eyre::eyre!("{e:?}"))?;
 
@@ -488,8 +492,15 @@ mod live {
             .max_fee_per_gas(max_fee)
             .gas_priority_fee(Some(priority_fee))
             .authorization_list(vec![])
-            .blob_hashes(vec![])
-            .max_fee_per_blob_gas(Int::ZERO.as_u128())
+            .blob_hashes(
+                tx.blob_versioned_hashes
+                    .iter()
+                    .map(to_b256)
+                    .collect::<Vec<B256>>(),
+            )
+            .max_fee_per_blob_gas(
+                tx.max_fee_per_blob_gas.unwrap_or_default().as_u128(),
+            )
             .build()
             .map_err(|e| eyre::eyre!("{e:?}"))?;
 

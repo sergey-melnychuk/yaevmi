@@ -340,6 +340,7 @@ impl Executor {
             None,
             tx.chain_id.to(),
             effective_gas_price,
+            tx.blob_versioned_hashes.clone(),
             state,
             chain,
         )
@@ -658,6 +659,7 @@ impl Executor {
                         Some(&this.ctx),
                         tx.chain_id.to(),
                         self.effective_gas_price,
+                        tx.blob_versioned_hashes.clone(),
                         state,
                         chain,
                     )
@@ -837,6 +839,7 @@ async fn prepare(
     ctx: Option<&Context>,
     chain_id: Int,
     gas_price: Int,
+    blob_hashes: Vec<Int>,
     state: &mut impl State,
     chain: &impl Chain,
 ) -> Result<CallFrame> {
@@ -868,7 +871,7 @@ async fn prepare(
         code
     };
     // GASPRICE opcode returns effective gas price (EIP-1559: min(max_fee, base_fee + priority))
-    let evm = Evm::new(head, code.into_vec(), call.gas, chain_id, gas_price);
+    let evm = Evm::new(head, code.into_vec(), call.gas, chain_id, gas_price, blob_hashes);
     let is_static = matches!(mode, CallMode::Static(_, _));
     let this = match mode {
         CallMode::Create(acc) => acc,

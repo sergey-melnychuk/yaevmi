@@ -38,6 +38,14 @@ impl<const N: usize> Hex<N> {
         usize::from_be_bytes(b)
     }
 
+    pub fn as_usize_checked(&self) -> Option<usize> {
+        const K: usize = size_of::<usize>();
+        if self.0[..N - K].iter().any(|&b| b != 0) {
+            return None;
+        }
+        Some(self.as_usize())
+    }
+
     pub fn as_u128(&self) -> u128 {
         const K: usize = size_of::<u128>();
         let mut b = [0u8; K];

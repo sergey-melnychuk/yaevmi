@@ -182,7 +182,7 @@ async fn test_meta_tx() -> eyre::Result<()> {
         max_priority_fee_per_gas: 1.into(),
         access_list: vec![],
         authorization_list: vec![],
-        blob_hashes: vec![],
+        blob_versioned_hashes: vec![],
         max_fee_per_blob_gas: Some(1.into()),
         hash: Int::ZERO,
         index: Int::ZERO,

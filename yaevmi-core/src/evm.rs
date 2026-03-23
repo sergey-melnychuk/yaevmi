@@ -153,6 +153,7 @@ pub struct Evm {
 
     pub chain_id: Int,
     pub gas_price: Int,
+    pub blob_hashes: Vec<Int>,
     pub(crate) pending_stack_pops: usize,
     pub(crate) pending_stack_push: Vec<Int>,
     pub(crate) pending_gas_charge: i64,
@@ -170,7 +171,14 @@ impl Evm {
     // Sanity check: (16 * 2^20) = 16Mb in practice.
     pub const MEMORY_SIZE_LIMIT: usize = (1_usize << 24);
 
-    pub fn new(head: Head, code: Vec<u8>, gas: u64, chain_id: Int, gas_price: Int) -> Self {
+    pub fn new(
+        head: Head,
+        code: Vec<u8>,
+        gas: u64,
+        chain_id: Int,
+        gas_price: Int,
+        blob_hashes: Vec<Int>,
+    ) -> Self {
         Self {
             pc: 0,
             gas: Gas::new(gas),
@@ -181,6 +189,7 @@ impl Evm {
             ret: Vec::new(),
             chain_id,
             gas_price,
+            blob_hashes,
             pending_stack_pops: 0,
             pending_stack_push: Vec::new(),
             pending_gas_charge: 0,
@@ -310,8 +319,8 @@ impl Evm {
             let new_words = (end / 32) as i64;
             let cost = (new_words * new_words / 512 + 3 * new_words)
                 - (old_words * old_words / 512 + 3 * old_words);
-            self.gas_charge(cost)?; // check gas first
-            self.memory.resize(end, 0); // then expand
+            self.gas_charge(cost)?;
+            self.memory.resize(end, 0);
         }
         Ok(())
     }
@@ -341,8 +350,11 @@ impl Evm {
 
     fn mem_store(&mut self, offset: usize, size: usize, source: Vec<u8>) {
         let _ = self.mem_expand(offset, size);
-        let copy_len = source.len().min(size);
-        self.memory[offset..offset + copy_len].copy_from_slice(&source[..copy_len]);
+        if size == 0 || source.is_empty() {
+            return;
+        }
+        let len = source.len().min(size);
+        self.memory[offset..offset + len].copy_from_slice(&source[..len]);
     }
 
     pub fn mem_put(&mut self, offset: usize, size: usize, source: &[u8]) -> EvmResult<()> {

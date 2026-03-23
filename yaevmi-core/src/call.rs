@@ -141,7 +141,7 @@ pub struct Tx {
     pub authorization_list: Vec<AuthorizationListItem>,
     #[serde(default)]
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub blob_hashes: Vec<Int>,
+    pub blob_versioned_hashes: Vec<Int>,
     #[serde(default)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_fee_per_blob_gas: Option<Int>,

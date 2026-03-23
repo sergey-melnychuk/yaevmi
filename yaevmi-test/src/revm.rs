@@ -206,8 +206,15 @@ pub async fn run(
         .max_fee_per_gas(max_fee)
         .gas_priority_fee(Some(priority_fee))
         .authorization_list(vec![])
-        .blob_hashes(vec![])
-        .max_fee_per_blob_gas(Int::ZERO.as_u128())
+        .blob_hashes(
+            tx.blob_versioned_hashes
+                .iter()
+                .map(to_b256)
+                .collect::<Vec<B256>>(),
+        )
+        .max_fee_per_blob_gas(
+            tx.max_fee_per_blob_gas.unwrap_or_default().as_u128(),
+        )
         .build()
         .map_err(|e| eyre::eyre!("{e:?}"))?;
 

@@ -329,10 +329,13 @@ pub fn basefee(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmRe
 
 pub fn blobhash(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<()> {
     evm.gas_charge(3)?;
-    let [_index] = evm.peek()?;
-    // TODO: EIP-4844
-    // tx.blob_versioned_hashes[index] or 0 if out of range.
-    evm.push(Int::ZERO)?;
+    let [index] = evm.peek()?;
+    let hash = index
+        .as_usize_checked()
+        .and_then(|i| evm.blob_hashes.get(i))
+        .copied()
+        .unwrap_or(Int::ZERO);
+    evm.push(hash)?;
     Ok(())
 }
 
