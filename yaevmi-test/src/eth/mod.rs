@@ -50,6 +50,9 @@ impl Chain for EmptyChain {
     async fn block(&self, number: u64) -> eyre::Result<Block> {
         eyre::bail!("EmptyChain: block({number}) not available")
     }
+    async fn chain_id(&self) -> eyre::Result<u64> {
+        Ok(0)
+    }
 }
 
 /// Build a map from addresses to account states.

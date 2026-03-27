@@ -5792,6 +5792,8 @@ dependencies = [
 name = "yaevmi-core"
 version = "0.1.0"
 dependencies = [
+ "alloy-eip7702",
+ "alloy-primitives",
  "async-trait",
  "ethnum",
  "eyre",
@@ -5834,6 +5836,8 @@ dependencies = [
 name = "yaevmi-test"
 version = "0.1.0"
 dependencies = [
+ "alloy-eip7702",
+ "alloy-primitives",
  "alloy-provider",
  "async-trait",
  "dotenv",

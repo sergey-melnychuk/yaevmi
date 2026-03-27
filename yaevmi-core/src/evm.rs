@@ -492,6 +492,10 @@ impl Evm {
                             step.memory = self.memory.len();
                             step.debug
                                 .push(format!("CALL:to={},gas={}", call.to, call.gas));
+                            if !call.eth.is_zero() {
+                                step.debug.push(format!("CALL:eth={}", call.eth));
+                            }
+                            step.debug.push(format!("CALL:mode={mode:?}"));
                             state.emit(Event::Step(step));
                         }
                         StepResult::Call(call, mode)

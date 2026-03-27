@@ -18,25 +18,26 @@ pub trait Chain {
     async fn balance(&self, acc: &Acc) -> eyre::Result<Int>;
     async fn head(&self, number: u64) -> eyre::Result<Head>;
     async fn block(&self, number: u64) -> eyre::Result<Block>;
+    async fn chain_id(&self) -> eyre::Result<u64>;
 }
 
 pub async fn fetch(f: Fetch, state: &mut impl State, chain: &impl Chain) -> Result<()> {
     match f {
         Fetch::Account(acc) => {
             let account = chain.acc(&acc).await?;
-            *state.acc_mut(&acc) = account;
+            state.merge(&acc, account);
         }
         Fetch::Balance(acc) => {
             let account = chain.acc(&acc).await?;
-            *state.acc_mut(&acc) = account;
+            state.merge(&acc, account);
         }
         Fetch::Nonce(acc) => {
             let account = chain.acc(&acc).await?;
-            *state.acc_mut(&acc) = account;
+            state.merge(&acc, account);
         }
         Fetch::Code(acc) => {
             let account = chain.acc(&acc).await?;
-            *state.acc_mut(&acc) = account;
+            state.merge(&acc, account);
         }
         Fetch::BlockHash(number) => {
             let hash = chain

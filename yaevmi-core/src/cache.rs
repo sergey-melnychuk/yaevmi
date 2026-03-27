@@ -31,11 +31,14 @@ impl AccountEntry {
 
 impl Default for AccountEntry {
     fn default() -> Self {
-        Self::new(Account {
-            value: Int::ZERO,
-            nonce: Int::ZERO,
-            code: (vec![].into(), Int::ZERO),
-        })
+        Self {
+            account: Account {
+                value: Int::ZERO,
+                nonce: Int::ZERO,
+                code: (vec![].into(), Int::ZERO),
+            },
+            storage: HashMap::new(),
+        }
     }
 }
 
@@ -241,13 +244,14 @@ impl State for Cache {
 
     fn set_auth(&mut self, src: &Acc, dst: &Acc) {
         let mut code = vec![0; 23];
-        code[..3].copy_from_slice(&[0xFE, 0x10, 0x00]);
+        // EIP-7702 delegation designator: 0xef0100 || address (20 bytes)
+        code[..3].copy_from_slice(&[0xEF, 0x01, 0x00]);
         code[3..].copy_from_slice(dst.as_ref());
         self.set_code(src, code.into(), Int::ZERO);
     }
 
-    fn acc_mut(&mut self, acc: &Acc) -> &mut Account {
-        &mut self.accounts.entry(*acc).or_default().account
+    fn merge(&mut self, acc: &Acc, chain: Account) {
+        self.accounts.entry(*acc).or_default().account = chain;
     }
 
     fn balance(&mut self, acc: &Acc) -> Option<Int> {
@@ -356,11 +360,7 @@ impl State for Cache {
         let (code, _) = &entry.account.code;
         if code.0.len() == 23 && code.0.starts_with(&[0xEF, 0x01, 0x00]) {
             let acc = Acc::from(&code.0[3..]);
-            if acc.is_zero() {
-                None
-            } else {
-                Some(acc)
-            }
+            if acc.is_zero() { None } else { Some(acc) }
         } else {
             None
         }
@@ -471,6 +471,7 @@ impl State for Cache {
                 }
                 Revert::Create(acc) => {
                     self.created.remove(&acc);
+                    self.accounts.remove(&acc);
                 }
                 Revert::Delete(acc) => {
                     self.destroyed.remove(&acc);

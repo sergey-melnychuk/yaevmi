@@ -1,7 +1,6 @@
 #[cfg(test)]
 pub mod eth;
 
-#[cfg(test)]
 pub mod revm;
 
 #[cfg(test)]

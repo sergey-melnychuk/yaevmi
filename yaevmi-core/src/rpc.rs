@@ -161,6 +161,11 @@ impl Chain for Rpc {
         .await?;
         Ok(block)
     }
+
+    async fn chain_id(&self) -> eyre::Result<u64> {
+        let chain_id: Int = call(&self.http, &self.url, "eth_chainId", &[]).await?;
+        Ok(chain_id.as_u64())
+    }
 }
 
 async fn head(http: &Http, url: &str, arg: String) -> eyre::Result<Head> {

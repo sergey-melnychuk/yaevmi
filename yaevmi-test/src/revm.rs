@@ -58,19 +58,6 @@ impl<CTX: ContextTr> Inspector<CTX, EthInterpreter> for Tracer {
             debug: vec![],
         });
         self.gas = gas;
-
-        if op == 0x55
-            && let (Ok(key), Ok(val)) = (interp.stack.peek(0), interp.stack.peek(1))
-            && let Some(step) = self.step.as_mut()
-        {
-            step.debug.push(format!("SSTORE: key={key:?}"));
-            step.debug.push(format!("SSTORE: val={val:?}"));
-        }
-        // let address = interp.input.target_address;
-        // if let Some(load) = ctx.sload(address, key) {
-        //     step.debug.push(format!("SSTORE: cur={:?}", load.data));
-        //     step.debug.push(format!("SSTORE: cold={}", load.is_cold));
-        // };
     }
 
     fn step_end(&mut self, interp: &mut Interpreter<EthInterpreter>, _ctx: &mut CTX) {
@@ -89,14 +76,6 @@ impl<CTX: ContextTr> Inspector<CTX, EthInterpreter> for Tracer {
                 step.debug.push(format!("refund={refund}"));
             }
             step.debug.push(format!("depth={}", self.depth));
-
-            // let target = interp.input.target_address;
-            // let balance = ctx
-            //     .balance(interp.input.target_address)
-            //     .map(|state| state.data)
-            //     .unwrap_or_default();
-            // step.debug.push(format!("balance[{target:?}]={balance:?}"));
-
             self.traces.push(step);
         }
     }
@@ -166,7 +145,12 @@ pub async fn run(
     ctx.block.basefee = head.base_fee.as_u64();
     ctx.block.prevrandao = Some(to_b256(&head.prevrandao));
 
-    ctx.cfg.chain_id = tx.chain_id.as_u64();
+    // RPC legacy txs often omit chainId → tx.chain_id == 0; REVM rejects cfg.chain_id == 0.
+    ctx.cfg.chain_id = if tx.chain_id.is_zero() {
+        1
+    } else {
+        tx.chain_id.as_u64()
+    };
     ctx.cfg.set_spec_and_mainnet_gas_params(SpecId::CANCUN);
 
     // For legacy tx (max_fee_per_gas=0), use gas_price for effective fee
@@ -212,9 +196,7 @@ pub async fn run(
                 .map(to_b256)
                 .collect::<Vec<B256>>(),
         )
-        .max_fee_per_blob_gas(
-            tx.max_fee_per_blob_gas.unwrap_or_default().as_u128(),
-        )
+        .max_fee_per_blob_gas(tx.max_fee_per_blob_gas.unwrap_or_default().as_u128())
         .build()
         .map_err(|e| eyre::eyre!("{e:?}"))?;
 

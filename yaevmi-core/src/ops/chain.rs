@@ -26,6 +26,9 @@ pub fn balance(evm: &mut Evm, _: &Context, _: &Call, state: &mut dyn State) -> E
         evm.gas_charge(2_500)?;
     }
     evm.push(balance)?;
+    if let Some(step) = evm.step.as_mut() {
+        step.debug.push(format!("BALANCE: {balance:?}"));
+    }
     Ok(())
 }
 
@@ -37,7 +40,11 @@ pub fn origin(evm: &mut Evm, ctx: &Context, _: &Call, _: &mut dyn State) -> EvmR
 
 pub fn caller(evm: &mut Evm, _: &Context, call: &Call, _: &mut dyn State) -> EvmResult<()> {
     evm.gas_charge(2)?;
-    evm.push(call.by.to())?;
+    let caller = call.by;
+    evm.push(caller.to())?;
+    if let Some(step) = evm.step.as_mut() {
+        step.debug.push(format!("CALLER: {caller:?}"));
+    }
     Ok(())
 }
 

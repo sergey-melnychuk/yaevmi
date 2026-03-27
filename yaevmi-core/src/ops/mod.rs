@@ -351,17 +351,8 @@ pub mod tests {
         Empty::default()
     }
 
-    pub struct Empty(Account);
-
-    impl Default for Empty {
-        fn default() -> Self {
-            Self(Account {
-                value: Int::ZERO,
-                nonce: Int::ZERO,
-                code: (vec![].into(), Int::ZERO),
-            })
-        }
-    }
+    #[derive(Default)]
+    pub struct Empty;
 
     impl State for Empty {
         fn get(&mut self, _: &Acc, _: &Int) -> Option<(Int, Int)> {
@@ -388,9 +379,6 @@ pub mod tests {
         fn set_code(&mut self, _: &Acc, _: Buf, _: Int) -> Int {
             Int::ZERO
         }
-        fn acc_mut(&mut self, _: &Acc) -> &mut Account {
-            &mut self.0
-        }
         fn balance(&mut self, _: &Acc) -> Option<Int> {
             None
         }
@@ -403,6 +391,7 @@ pub mod tests {
         fn acc(&mut self, _: &Acc) -> Option<Account> {
             None
         }
+        fn merge(&mut self, _: &Acc, _: Account) {}
         fn is_cold_acc(&self, _: &Acc) -> bool {
             true
         }

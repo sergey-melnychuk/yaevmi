@@ -104,17 +104,19 @@ async fn main() -> eyre::Result<()> {
     });
 
     let txs = rpc.block(head.number.as_u64()).await?.txs;
-    let pack = (txs.clone(), head.clone(), index);
+    let pack = (txs.clone(), head.clone(), index, chain_id);
 
     let provider = ProviderBuilder::new().connect(&url).await?;
     tokio::task::spawn_blocking(move || {
-        let (txs, head, index) = pack;
+        let (txs, head, index, network_chain_id) = pack;
         if let Some(i) = index {
             let tx = &txs[i];
             let (call, tx) = (tx.call.clone().into(), tx.tx.clone());
-            let _ = live::run_one(call, tx, head, rtx, provider);
-        } else {
-            let _ = live::run_all(chain_id, &txs, head, rtx, provider);
+            if let Err(e) = live::run_one(call, tx, head, network_chain_id, rtx, provider) {
+                eprintln!("REVM replay error (no trace steps): {e:#}");
+            }
+        } else if let Err(e) = live::run_all(network_chain_id, &txs, head, rtx, provider) {
+            eprintln!("REVM replay error (no trace steps): {e:#}");
         }
     });
 
@@ -225,6 +227,8 @@ fn check(result: CallResult, receipt: Receipt) -> Vec<String> {
 // (this allows re-running blocks on-demand without RPC calls)
 
 mod live {
+    use alloy_eip7702::{Authorization, SignedAuthorization};
+    use alloy_primitives::{Address as AlloyAddress, U256 as AlloyU256};
     use alloy_provider::Provider;
     use revm::bytecode::opcode::OpCode;
     use revm::context::transaction::{AccessList, AccessListItem};
@@ -243,6 +247,26 @@ mod live {
     use yaevmi_core::trace::Step;
     use yaevmi_core::{Call, Head, Tx};
     use yaevmi_misc::buf::Buf;
+
+    fn signed_authorizations(tx: &Tx) -> Vec<SignedAuthorization> {
+        tx.authorization_list
+            .iter()
+            .map(|item| {
+                SignedAuthorization::new_unchecked(
+                    Authorization {
+                        chain_id: AlloyU256::from_be_bytes(
+                            <[u8; 32]>::try_from(item.chain_id.as_ref()).unwrap(),
+                        ),
+                        address: AlloyAddress::from_slice(item.address.as_ref()),
+                        nonce: item.nonce.as_u64(),
+                    },
+                    item.y_parity.as_u8(),
+                    AlloyU256::from_be_bytes(<[u8; 32]>::try_from(item.r.as_ref()).unwrap()),
+                    AlloyU256::from_be_bytes(<[u8; 32]>::try_from(item.s.as_ref()).unwrap()),
+                )
+            })
+            .collect()
+    }
 
     #[derive(Debug, Default)]
     pub struct Tracer {
@@ -293,7 +317,7 @@ mod live {
             }
         }
 
-        fn step_end(&mut self, interp: &mut Interpreter<EthInterpreter>, _ctx: &mut CTX) {
+        fn step_end(&mut self, interp: &mut Interpreter<EthInterpreter>, ctx: &mut CTX) {
             let gas = interp.gas.remaining();
             let cost = self.gas - gas;
 
@@ -309,6 +333,30 @@ mod live {
                     step.debug.push(format!("refund={refund}"));
                 }
                 step.debug.push(format!("depth={}", self.depth));
+
+                if step.name == "SSTORE"
+                    && let (Ok(key), Ok(val)) = (interp.stack.peek(0), interp.stack.peek(1))
+                {
+                    step.debug.push(format!("SSTORE: key={key:?}"));
+                    step.debug.push(format!("SSTORE: val={val:?}"));
+                }
+
+                if step.name == "CALLER" {
+                    let caller = interp.stack.peek(0).unwrap_or_default();
+                    step.debug.push(format!("CALLER: {caller:0x}"));
+                }
+                if step.name == "BALANCE" {
+                    let balance = interp.stack.peek(0).unwrap_or_default();
+                    step.debug.push(format!("BALANCE: {balance:0x}"));
+                }
+                let target = interp.input.target_address;
+                let balance = ctx
+                    .balance(interp.input.target_address)
+                    .map(|state| state.data)
+                    .unwrap_or_default();
+                step.debug
+                    .push(format!("TARGET: {target:0x} (balance={balance:0x})"));
+
                 if let Some(tx) = self.tx.as_mut() {
                     let _ = tx.try_send(step); // TODO: check for error
                 }
@@ -410,16 +458,14 @@ mod live {
                 ))
                 .max_fee_per_gas(max_fee)
                 .gas_priority_fee(Some(priority_fee))
-                .authorization_list(vec![])
+                .authorization_list_signed(signed_authorizations(&tx))
                 .blob_hashes(
                     tx.blob_versioned_hashes
                         .iter()
                         .map(to_b256)
                         .collect::<Vec<B256>>(),
                 )
-                .max_fee_per_blob_gas(
-                    tx.max_fee_per_blob_gas.unwrap_or_default().as_u128(),
-                )
+                .max_fee_per_blob_gas(tx.max_fee_per_blob_gas.unwrap_or_default().as_u128())
                 .build()
                 .map_err(|e| eyre::eyre!("{e:?}"))?;
 
@@ -435,6 +481,7 @@ mod live {
         call: Call,
         tx: Tx,
         head: Head,
+        network_chain_id: u64,
         sender: mpsc::Sender<Step>,
         provider: impl Provider + Clone,
     ) -> eyre::Result<()> {
@@ -453,7 +500,11 @@ mod live {
         ctx.block.beneficiary = to_addr(&head.coinbase);
         ctx.block.basefee = head.base_fee.as_u64();
         ctx.block.prevrandao = Some(to_b256(&head.prevrandao));
-        ctx.cfg.chain_id = tx.chain_id.as_u64();
+        ctx.cfg.chain_id = if tx.chain_id.is_zero() {
+            network_chain_id
+        } else {
+            tx.chain_id.as_u64()
+        };
 
         // For legacy tx (max_fee_per_gas=0), use gas_price for effective fee
         let max_fee = if tx.max_fee_per_gas.is_zero() {
@@ -472,7 +523,7 @@ mod live {
         } else {
             TxKind::Call(to_addr(&call.to))
         };
-        let tx = TxEnv::builder()
+        let tx_env = TxEnv::builder()
             .caller(to_addr(&call.by))
             .kind(kind)
             .gas_limit(call.gas)
@@ -491,16 +542,14 @@ mod live {
             ))
             .max_fee_per_gas(max_fee)
             .gas_priority_fee(Some(priority_fee))
-            .authorization_list(vec![])
+            .authorization_list_signed(signed_authorizations(&tx))
             .blob_hashes(
                 tx.blob_versioned_hashes
                     .iter()
                     .map(to_b256)
                     .collect::<Vec<B256>>(),
             )
-            .max_fee_per_blob_gas(
-                tx.max_fee_per_blob_gas.unwrap_or_default().as_u128(),
-            )
+            .max_fee_per_blob_gas(tx.max_fee_per_blob_gas.unwrap_or_default().as_u128())
             .build()
             .map_err(|e| eyre::eyre!("{e:?}"))?;
 
@@ -512,7 +561,7 @@ mod live {
         let ExecResultAndState {
             result: _,
             state: _,
-        } = evm.inspect_tx(tx)?;
+        } = evm.inspect_tx(tx_env)?;
         let _ = evm.inspector.tx.take();
         Ok(())
     }

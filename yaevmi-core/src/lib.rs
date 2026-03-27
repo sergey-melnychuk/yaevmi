@@ -11,6 +11,7 @@ pub mod aux;
 pub mod cache;
 pub mod call;
 pub mod chain;
+pub mod eip7702;
 pub mod evm;
 pub mod exe;
 pub mod ops;

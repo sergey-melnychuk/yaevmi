@@ -262,7 +262,7 @@ impl Executor {
 
     pub async fn run(
         &mut self,
-        tx: Tx,
+        mut tx: Tx,
         head: Head,
         state: &mut impl State,
         chain: &impl Chain,
@@ -275,14 +275,20 @@ impl Executor {
                 continue; // CREATE has no target; do not fetch 0x0
             }
             if state.acc(acc).is_none() {
-                *state.acc_mut(acc) = chain.acc(acc).await?;
+                state.merge(acc, chain.acc(acc).await?);
                 state.warm_acc(acc);
             }
         }
 
-        // Pre-transaction validation checks
+        if tx.chain_id.is_zero() {
+            tx.chain_id = chain.chain_id().await?.into();
+        }
 
-        // TODO: wrap call.to with Option to distinguish call/transfer to 0x0 from CREATE
+        let eip7702_refund =
+            crate::eip7702::apply_authorization_list(&tx, tx.chain_id.as_u64(), state, chain)
+                .await?;
+
+        // Pre-transaction validation checks
 
         // EIP-1559: max_fee_per_gas must cover base_fee
         if !tx.max_fee_per_gas.is_zero() && tx.max_fee_per_gas < head.base_fee {
@@ -360,6 +366,8 @@ impl Executor {
                     ret: vec![].into(),
                     gas,
                 };
+                let mut result = result;
+                result.gas_mut().refund += eip7702_refund;
                 let gas_final = finalized(
                     &self.call,
                     &tx,
@@ -369,7 +377,6 @@ impl Executor {
                     state,
                     floor,
                 );
-                let mut result = result;
                 result.gas_mut().finalized = gas_final;
                 state.apply();
                 return Ok(result);
@@ -451,18 +458,10 @@ impl Executor {
                         gas,
                     } => {
                         last_popped_checkpoint = None; // success
-                        if !code.0.is_empty() {
-                            let hash = Int::from(keccak256(code.as_slice()).as_ref());
-                            use crate::trace::{Event, Target};
-                            state.emit(Event::Put(
-                                Target::Code {
-                                    acc: addr,
-                                    hash: Int::ZERO,
-                                },
-                                hash,
-                            ));
-                            state.acc_mut(&addr).code = (code, hash); // TODO: use state.set_code
-                        }
+
+                        let hash = Int::from(keccak256(code.as_slice()).as_ref());
+                        state.set_code(&addr, code, hash);
+
                         let _ = this.evm.push(addr.to());
                         let return_gas = (gas.limit - gas.spent).max(0);
                         this.evm.gas.spent -= return_gas;
@@ -628,6 +627,10 @@ impl Executor {
                         }
 
                         // Create account with nonce=1 (EIP-161), preserving pre-existing balance
+                        if state.acc(&created).is_none() {
+                            let account = chain.acc(&created).await?;
+                            state.merge(&created, account);
+                        }
                         let existing_balance = state.balance(&created).unwrap_or(Int::ZERO);
                         state.create(
                             created,
@@ -812,9 +815,10 @@ impl Executor {
             && !code.0.is_empty()
         {
             let hash = Int::from(keccak256(code.as_slice()).as_ref());
-            state.acc_mut(&addr).code = (code.clone(), hash); // TODO: use state.set_code
+            state.set_code(&addr, code.clone(), hash);
         }
 
+        result.gas_mut().refund += eip7702_refund;
         let gas_final = finalized(
             &self.call,
             &tx,
@@ -850,7 +854,7 @@ async fn prepare(
         code
     } else if let Ok(account) = chain.acc(&call.to).await {
         let code = account.code.0.clone();
-        *state.acc_mut(&call.to) = account;
+        state.merge(&call.to, account);
         code
     } else {
         Buf::default()
@@ -861,7 +865,7 @@ async fn prepare(
             code
         } else if let Ok(account) = chain.acc(&delegate).await {
             let code = account.code.0.clone();
-            *state.acc_mut(&delegate) = account;
+            state.merge(&delegate, account);
             code
         } else {
             Buf::default()
@@ -870,7 +874,14 @@ async fn prepare(
         code
     };
     // GASPRICE opcode returns effective gas price (EIP-1559: min(max_fee, base_fee + priority))
-    let evm = Evm::new(head, code.into_vec(), call.gas, chain_id, gas_price, blob_hashes);
+    let evm = Evm::new(
+        head,
+        code.into_vec(),
+        call.gas,
+        chain_id,
+        gas_price,
+        blob_hashes,
+    );
     let is_static = matches!(mode, CallMode::Static(_, _));
     let this = match mode {
         CallMode::Create(acc) => acc,

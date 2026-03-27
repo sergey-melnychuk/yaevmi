@@ -23,6 +23,7 @@ pub fn log(evm: &mut Evm, ctx: &Context, _: &Call, state: &mut dyn State) -> Evm
     let base = 375 + 375 * n as i64;
     let max = (evm.gas_remaining() - base) / 8;
     if max < 0 || size > max as usize {
+        evm.pending_gas_charge += evm.gas_remaining();
         return Err(EvmYield::Halt(HaltReason::OutOfGas));
     }
 

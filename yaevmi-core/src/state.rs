@@ -22,7 +22,7 @@ pub trait State {
     fn set_code(&mut self, acc: &Acc, code: Buf, hash: Int) -> Int;
     fn set_auth(&mut self, src: &Acc, dst: &Acc);
 
-    fn acc_mut(&mut self, acc: &Acc) -> &mut Account;
+    fn merge(&mut self, acc: &Acc, chain: Account);
 
     fn balance(&mut self, acc: &Acc) -> Option<Int>;
     fn nonce(&mut self, acc: &Acc) -> Option<Int>;
