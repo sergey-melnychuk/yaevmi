@@ -175,10 +175,12 @@ pub fn intrinsic(
     }
     state.set_value(&call.by, sub([balance, upfront]));
 
-    // EIP-7702: authorization list gas (25000/auth tuple)
+    // EIP-7702: authorization list gas (PER_EMPTY_ACCOUNT_COST per tuple, matches revm).
+    // EIP-7623 floor is only 21_000 + 10 * tokens (calc_tx_floor_cost); it must NOT include
+    // authorization list gas — see revm `calculate_initial_tx_gas` (PRAGUE branch) and
+    // `eip7623_check_gas_floor` (floor_gas excludes auth, initial_gas includes it).
     let auth_cost = 25_000 * tx.authorization_list.len() as i64;
     total += auth_cost;
-    floor += auth_cost;
     Ok((total, floor, effective_gas_price))
 }
 
@@ -859,13 +861,18 @@ async fn prepare(
     } else {
         Buf::default()
     };
-    // EIP-7702: resolve delegation after code is loaded
+    // EIP-7702: resolve delegation after code is loaded.
+    // Revm's `load_account_delegated` marks both the delegated account and the implementation
+    // address warm when resolving code for a frame; mirror that so *CALL does not charge cold
+    // access for an address already loaded for execution (see revm-context JournalInner).
     let code = if let Some(delegate) = state.auth(&call.to) {
         if let Some((code, _)) = state.code(&delegate) {
+            state.warm_acc(&delegate);
             code
         } else if let Ok(account) = chain.acc(&delegate).await {
             let code = account.code.0.clone();
             state.merge(&delegate, account);
+            state.warm_acc(&delegate);
             code
         } else {
             Buf::default()
