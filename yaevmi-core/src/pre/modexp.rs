@@ -1,7 +1,7 @@
 use num_bigint::BigUint;
 use num_traits::{One, Zero};
 
-/// MODEXP (precompile 0x05) - EIP-198 / EIP-2565
+/// MODEXP (precompile 0x05) - EIP-198 / EIP-2565 / EIP-7883 (Pectra)
 /// Input: Bsize (32) || Esize (32) || Msize (32) || B (Bsize) || E (Esize) || M (Msize)
 /// Output: result zero-padded to Msize bytes
 pub fn modexp(input: &[u8], gas_limit: i64) -> (bool, Vec<u8>, i64) {
@@ -15,7 +15,7 @@ pub fn modexp(input: &[u8], gas_limit: i64) -> (bool, Vec<u8>, i64) {
     let e_size_u64 = read_u64(&buf[32..64]);
     let m_size_u64 = read_u64(&buf[64..96]);
 
-    // Gas calculation per EIP-2565 (uses u64 sizes, saturating on overflow)
+    // Gas calculation per EIP-7883 (Pectra update to EIP-2565)
     let gas = modexp_gas(b_size_u64, e_size_u64, m_size_u64, &buf);
     if gas > gas_limit {
         return (false, vec![], gas_limit);
@@ -79,16 +79,26 @@ fn read_u64(data: &[u8]) -> u64 {
     u64::from_be_bytes(bytes[24..32].try_into().unwrap())
 }
 
+/// EIP-7883 (Pectra) modexp gas calculation.
+/// Changes from EIP-2565:
+///   - min gas: 200 → 500
+///   - gas divisor: 3 → 1
+///   - for max_len > 32: complexity = 2 * words² (was words²)
+///   - iteration multiplier for exp_length > 32: 8 → 16
 fn modexp_gas(b_size: u64, e_size: u64, m_size: u64, input: &[u8]) -> i64 {
-    // EIP-2565 gas calculation with saturating arithmetic for large sizes
     let max_len = b_size.max(m_size);
-    let words = max_len.div_ceil(8);
-    let multiplication_complexity = words.saturating_mul(words);
+
+    let multiplication_complexity = if max_len <= 32 {
+        16u64
+    } else {
+        let words = max_len.div_ceil(8);
+        2u64.saturating_mul(words.saturating_mul(words))
+    };
 
     let iteration_count = calc_iteration_count(e_size, b_size, input);
 
-    let cost = multiplication_complexity.saturating_mul(iteration_count.max(1)) / 3;
-    cost.max(200).min(i64::MAX as u64) as i64
+    let cost = multiplication_complexity.saturating_mul(iteration_count.max(1));
+    cost.max(500).min(i64::MAX as u64) as i64
 }
 
 fn calc_iteration_count(e_size: u64, b_size: u64, input: &[u8]) -> u64 {
@@ -122,6 +132,7 @@ fn calc_iteration_count(e_size: u64, b_size: u64, input: &[u8]) -> u64 {
         } else {
             e_head.bits() as u64 - 1
         };
-        head_bits.saturating_add(8u64.saturating_mul(e_size - 32))
+        // EIP-7883: multiplier is 16 (was 8 in EIP-2565)
+        head_bits.saturating_add(16u64.saturating_mul(e_size - 32))
     }
 }

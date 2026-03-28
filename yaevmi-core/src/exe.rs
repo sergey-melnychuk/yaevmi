@@ -199,6 +199,7 @@ pub fn finalized(
     let effective_refund = gas.refund.min(gas.spent / 5);
     // EIP-7623: floor gas cost for calldata-heavy transactions
     let final_gas = (gas.spent - effective_refund).max(0).max(floor) as u64;
+    //eprintln!("FINALIZED: limit={} spent={} refund={} eff_refund={effective_refund} floor={floor} final_gas={final_gas}", gas.limit, gas.spent, gas.refund);
     let returned_gas = (gas.limit.max(0) as u64).saturating_sub(final_gas);
     let mul = lift(|[a, b]| a * b);
     let sub = lift(|[a, b]| a - b);
@@ -446,6 +447,10 @@ impl Executor {
                         this.evm.gas.spent -= return_gas;
                         // Only propagate refund on success; reverted refunds are discarded.
                         if !status.is_zero() {
+                            // eprintln!(
+                            //     "REFUND_PROP: depth={} child_refund={} parent_before={}",
+                            //     this.ctx.depth, gas.refund, this.evm.gas.refund
+                            // );
                             this.evm.gas.refund += gas.refund;
                         }
                         this.evm.apply(state);

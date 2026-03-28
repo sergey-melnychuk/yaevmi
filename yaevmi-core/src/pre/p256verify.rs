@@ -1,11 +1,11 @@
 use p256::ecdsa::{Signature, VerifyingKey, signature::hazmat::PrehashVerifier};
 
-/// P256VERIFY (precompile 0x100) - EIP-7212
+/// P256VERIFY (precompile 0x100) - EIP-7212 / Osaka gas increase
 /// Input: hash (32) || r (32) || s (32) || x (32) || y (32) = 160 bytes
 /// Output: 1 (32 bytes, big-endian) on valid signature, empty on invalid
-/// Gas: 3450
+/// Gas: 6900 (post-Osaka, was 3450)
 pub fn p256verify(input: &[u8], gas_limit: i64) -> (bool, Vec<u8>, i64) {
-    const GAS: i64 = 3_450;
+    const GAS: i64 = 6_900;
     if GAS > gas_limit {
         return (false, vec![], gas_limit);
     }

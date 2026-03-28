@@ -300,9 +300,6 @@ impl Evm {
     }
 
     pub fn gas_refund(&mut self, gas: i64) -> EvmResult<()> {
-        if self.gas.refund + self.pending_gas_refund + gas < 0 {
-            return Err(EvmYield::Halt(HaltReason::OutOfGas));
-        }
         self.pending_gas_refund += gas;
         Ok(())
     }
@@ -441,6 +438,7 @@ impl Evm {
                     step.stack = self.stack.len();
                     step.memory = self.memory.len();
                     step.debug.push(format!("cost={cost}"));
+                    step.debug.push(format!("gas_refund={}", self.gas.refund));
                     state.emit(Event::Step(step));
                 }
                 StepResult::Ok

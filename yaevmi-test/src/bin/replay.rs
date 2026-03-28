@@ -329,6 +329,7 @@ mod live {
                 step.stack = interp.stack.len();
                 step.memory = interp.memory.len();
                 step.debug.push(format!("cost={cost}"));
+                step.debug.push(format!("gas_refund={}", self.refund));
                 if refund > 0 {
                     step.debug.push(format!("refund={refund}"));
                 }
