@@ -286,6 +286,10 @@ impl Executor {
             tx.chain_id = chain.chain_id().await?.into();
         }
 
+        // EIP-7702: sender nonce must be incremented before authorization list processing,
+        // because when authority == sender the auth nonce check uses the post-increment value.
+        state.inc_nonce(&self.call.by, Int::ONE);
+
         let eip7702_refund =
             crate::eip7702::apply_authorization_list(&tx, tx.chain_id.as_u64(), state, chain)
                 .await?;
@@ -337,7 +341,6 @@ impl Executor {
                 want: intrinsic as u64,
             });
         }
-        state.inc_nonce(&self.call.by, Int::ONE);
 
         // prepare() takes a checkpoint to be able to revert,
         // so all state mutations must come AFTER that to be included.
