@@ -68,10 +68,10 @@ async fn main() -> eyre::Result<()> {
     println!("Block: {} / {}", head.number.as_u64(), head.hash);
     rpc.reset(block - 1).await?;
 
-    let (ytx, mut yrx) = mpsc::channel(1024 * 1024);
+    let (ytx, mut yrx) = mpsc::channel(4 * 1024 * 1024);
     let mut cache = Cache::with_sender(ytx);
 
-    let (rtx, mut rrx) = mpsc::channel(1024 * 1024);
+    let (rtx, mut rrx) = tokio::sync::mpsc::channel(4096);
 
     let handle = tokio::spawn(async move {
         let is_trace = std::env::var("TRACE").is_ok();
@@ -81,7 +81,7 @@ async fn main() -> eyre::Result<()> {
         let mut skip = 0;
         loop {
             let y = yrx.next().await;
-            let r = rrx.next().await;
+            let r = rrx.recv().await;
             if let (Some(mut y), Some(mut r)) = (y, r) {
                 if y != r {
                     println!("===\nSTEP MISMATCH:\nYEVM: {y:#?}\nREVM: {r:#?}\n(skip: {skip})");
@@ -241,7 +241,7 @@ mod live {
     use revm::primitives::{Address, B256, Bytes, TxKind, U256};
     use revm::{Context, ExecuteCommitEvm, InspectEvm, Inspector, MainBuilder, MainContext};
 
-    use futures::channel::mpsc;
+    use tokio::sync::mpsc;
     use yaevmi_base::{Acc, Int};
     use yaevmi_core::call::TxFull;
     use yaevmi_core::trace::Step;
@@ -358,8 +358,10 @@ mod live {
                 step.debug
                     .push(format!("TARGET: {target:0x} (balance={balance:0x})"));
 
-                if let Some(tx) = self.tx.as_mut() {
-                    let _ = tx.try_send(step); // TODO: check for error
+                if let Some(tx) = self.tx.as_ref() {
+                    if tx.blocking_send(step).is_err() {
+                        self.tx = None;
+                    }
                 }
             }
         }

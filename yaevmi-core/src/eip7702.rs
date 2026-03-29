@@ -57,13 +57,14 @@ pub async fn apply_authorization_list(
             continue;
         }
 
-        if state.acc(&authority).is_none() {
+        let acc = if let Some(acc) = state.acc(&authority) {
+            acc
+        } else {
             let account = chain.acc(&authority).await?;
-            state.merge(&authority, account);
-        }
-        let Some(acc) = state.acc(&authority) else {
-            continue;
+            state.merge(&authority, account.clone());
+            account
         };
+        state.warm_acc(&authority);
 
         let code = acc.code.0.as_slice();
         if !code_is_empty_or_eip7702(code) {
@@ -79,13 +80,15 @@ pub async fn apply_authorization_list(
             refund += PER_EMPTY_ACCOUNT - PER_AUTH_BASE;
         }
 
-        state.warm_acc(&authority);
-
         if item.address.is_zero() {
             let hash = Int::from(yaevmi_misc::keccak256(&[]).as_ref());
             state.set_code(&authority, Buf::default(), hash);
         } else {
             state.set_auth(&authority, &item.address);
+            if state.acc(&item.address).is_none() {
+                let acc = chain.acc(&item.address).await?;
+                state.merge(&item.address, acc);
+            }
         }
         state.inc_nonce(&authority, Int::ONE);
     }

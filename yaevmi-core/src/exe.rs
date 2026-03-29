@@ -108,7 +108,6 @@ pub fn intrinsic(
     {
         let al_cost = 2_400 + 1_900 * keys.len() as i64;
         total += al_cost;
-        floor += al_cost;
         state.warm_acc(&acc);
         for key in keys {
             state.warm_key(&acc, key);
