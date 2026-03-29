@@ -57,7 +57,7 @@ async fn test_token_buy_use_give() -> eyre::Result<()> {
     let exp0 =
         crate::revm::run(deploy_mock.clone(), head.clone(), env.clone(), tx0.clone()).await?;
     let res0 = super::run(deploy_mock, head.clone(), env, tx0).await?;
-    pretty_assertions::assert_eq!(res0, exp0, "deploy MockERC20 must match revm");
+    super::assert_match(&res0, &exp0, "deploy MockERC20");
 
     let mock_addr: Acc = res0.0.to();
     let env1 = res0.4;
@@ -84,7 +84,7 @@ async fn test_token_buy_use_give() -> eyre::Result<()> {
     )
     .await?;
     let res1 = super::run(deploy_token, head.clone(), env1, tx1).await?;
-    pretty_assertions::assert_eq!(res1, exp1, "deploy Token must match revm");
+    super::assert_match(&res1, &exp1, "deploy Token");
 
     let token_addr: Acc = res1.0.to();
     let env2 = res1.4;
@@ -104,7 +104,7 @@ async fn test_token_buy_use_give() -> eyre::Result<()> {
     let tx2 = super::tx(2);
     let exp2 = crate::revm::run(mint_call.clone(), head.clone(), env2.clone(), tx2.clone()).await?;
     let res2 = super::run(mint_call, head.clone(), env2, tx2).await?;
-    pretty_assertions::assert_eq!(res2, exp2, "mint must match revm");
+    super::assert_match(&res2, &exp2, "mint");
 
     let env3 = res2.4;
 
@@ -129,7 +129,7 @@ async fn test_token_buy_use_give() -> eyre::Result<()> {
     )
     .await?;
     let res3 = super::run(approve_call, head.clone(), env3, tx3).await?;
-    pretty_assertions::assert_eq!(res3, exp3, "approve must match revm");
+    super::assert_match(&res3, &exp3, "approve");
 
     let env4 = res3.4;
 
@@ -144,7 +144,7 @@ async fn test_token_buy_use_give() -> eyre::Result<()> {
     let tx4 = super::tx(1);
     let exp4 = crate::revm::run(buy_call.clone(), head.clone(), env4.clone(), tx4.clone()).await?;
     let res4 = super::run(buy_call, head.clone(), env4, tx4).await?;
-    pretty_assertions::assert_eq!(res4, exp4, "buy() must match revm");
+    super::assert_match(&res4, &exp4, "buy()");
 
     let env5 = res4.4;
 
@@ -159,7 +159,7 @@ async fn test_token_buy_use_give() -> eyre::Result<()> {
     let tx5 = super::tx(2);
     let exp5 = crate::revm::run(use_call.clone(), head.clone(), env5.clone(), tx5.clone()).await?;
     let res5 = super::run(use_call, head.clone(), env5, tx5).await?;
-    pretty_assertions::assert_eq!(res5, exp5, "use() must match revm");
+    super::assert_match(&res5, &exp5, "use()");
 
     let env6 = res5.4;
 
@@ -177,7 +177,7 @@ async fn test_token_buy_use_give() -> eyre::Result<()> {
     let exp6 =
         crate::revm::run(check_call.clone(), head.clone(), env6.clone(), tx6.clone()).await?;
     let res6 = super::run(check_call, head, env6, tx6).await?;
-    pretty_assertions::assert_eq!(res6, exp6, "check() must match revm");
+    super::assert_match(&res6, &exp6, "check()");
 
     Ok(())
 }

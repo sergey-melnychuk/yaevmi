@@ -138,10 +138,12 @@ async fn main() -> eyre::Result<()> {
         let hash = tx.tx.hash;
         let (tx, call) = (tx.tx.clone(), tx.call.into());
         let mut exe = Executor::new(call);
-        let now = Instant::now();
         cache.reset();
+
+        let now = Instant::now();
         let result = exe.run(tx, head.clone(), &mut cache, &rpc).await?;
         let ms = now.elapsed().as_millis();
+
         let gas = result.gas().finalized;
         let fetches = exe.fetches;
         let fetching = exe.fetching.as_millis();

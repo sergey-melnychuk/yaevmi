@@ -73,7 +73,17 @@ pub async fn run(
         })
         .collect::<Vec<_>>();
 
-    let snapshot = state.snapshot();
+    let snapshot = state
+        .snapshot()
+        .into_iter()
+        .filter(|(_, account, storage)| {
+            let is_empty = account.value.is_zero()
+                && account.nonce.is_zero()
+                && account.code.0.is_empty()
+                && (storage.is_empty() || storage.iter().all(|(_, v)| v.is_zero()));
+            !is_empty
+        })
+        .collect::<Vec<_>>();
 
     Ok(match res {
         CallResult::Created {
@@ -115,7 +125,7 @@ pub fn tx(nonce: u64) -> Tx {
         access_list: vec![],
         authorization_list: vec![],
         blob_versioned_hashes: vec![],
-        max_fee_per_blob_gas: Some(1.into()),
+        max_fee_per_blob_gas: None,
         hash: Int::ZERO,
         index: Int::ZERO,
     }

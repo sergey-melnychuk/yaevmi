@@ -285,7 +285,14 @@ pub async fn run(
 
     let mut snapshot: Env = snapshot
         .into_iter()
-        .map(|(acc, (account, kv))| (acc, account, kv))
+        .map(|(acc, (account, storage))| (acc, account, storage))
+        .filter(|(_, account, storage)| {
+            let is_empty = account.value.is_zero()
+                && account.nonce.is_zero()
+                && account.code.0.is_empty()
+                && (storage.is_empty() || storage.iter().all(|(_, v)| v.is_zero()));
+            !is_empty
+        })
         .collect();
     snapshot.sort_by_key(|(acc, _, _)| *acc);
 

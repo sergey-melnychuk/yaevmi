@@ -30,10 +30,10 @@ pub struct EmptyChain;
 #[async_trait::async_trait]
 impl Chain for EmptyChain {
     async fn get(&self, _: &Acc, _: &Int) -> eyre::Result<Int> {
-        Ok(Default::default()) // empty/zero slots are not explicitly provided
+        Ok(Default::default()) // empty/zero slots are not stored
     }
     async fn acc(&self, _: &Acc) -> eyre::Result<Account> {
-        Ok(Default::default()) // empty accounts are not explicitly provided
+        Ok(Default::default()) // empty accounts are not stored
     }
     async fn code(&self, _: &Acc) -> eyre::Result<(Buf, Int)> {
         eyre::bail!("EmptyChain: code(acc) not available")

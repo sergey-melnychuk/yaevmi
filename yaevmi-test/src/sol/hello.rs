@@ -33,7 +33,7 @@ async fn test_hello_deploy_and_read() -> eyre::Result<()> {
     let tx0 = super::tx(0);
     let exp = crate::revm::run(deploy.clone(), head.clone(), env.clone(), tx0.clone()).await?;
     let res = super::run(deploy, head.clone(), env, tx0).await?;
-    pretty_assertions::assert_eq!(res, exp, "deploy Hello must match revm");
+    super::assert_match(&res, &exp, "deploy Hello");
 
     let deployed: Acc = res.0.to();
     assert_eq!(deployed, hello_addr, "Hello deployed at expected address");
@@ -50,7 +50,7 @@ async fn test_hello_deploy_and_read() -> eyre::Result<()> {
     let tx1 = super::tx(1);
     let exp1 = crate::revm::run(read_call.clone(), head.clone(), env1.clone(), tx1.clone()).await?;
     let res1 = super::run(read_call, head, env1, tx1).await?;
-    pretty_assertions::assert_eq!(res1, exp1, "message() must match revm");
+    super::assert_match(&res1, &exp1, "message()");
 
     Ok(())
 }
@@ -100,7 +100,7 @@ async fn test_owner_get_set_odd() -> eyre::Result<()> {
     let tx0 = super::tx(0);
     let exp0 = crate::revm::run(deploy.clone(), head.clone(), env.clone(), tx0.clone()).await?;
     let res0 = super::run(deploy, head.clone(), env, tx0).await?;
-    pretty_assertions::assert_eq!(res0, exp0, "deploy Owner must match revm");
+    super::assert_match(&res0, &exp0, "deploy Owner");
 
     let owner_addr: Acc = res0.0.to();
     let env1 = res0.4;
@@ -116,7 +116,7 @@ async fn test_owner_get_set_odd() -> eyre::Result<()> {
     let tx1 = super::tx(1);
     let exp1 = crate::revm::run(get_call.clone(), head.clone(), env1.clone(), tx1.clone()).await?;
     let res1 = super::run(get_call, head.clone(), env1.clone(), tx1).await?;
-    pretty_assertions::assert_eq!(res1, exp1, "get() must match revm");
+    super::assert_match(&res1, &exp1, "get()");
 
     // odd() should return true (7 is odd)
     let odd_call = Call {
@@ -129,7 +129,7 @@ async fn test_owner_get_set_odd() -> eyre::Result<()> {
     let tx2 = super::tx(1);
     let exp2 = crate::revm::run(odd_call.clone(), head.clone(), env1.clone(), tx2.clone()).await?;
     let res2 = super::run(odd_call, head.clone(), env1.clone(), tx2).await?;
-    pretty_assertions::assert_eq!(res2, exp2, "odd() must match revm");
+    super::assert_match(&res2, &exp2, "odd()");
 
     // set(10) by owner should succeed
     let mut set_data = super::selector("set(uint256)");
@@ -144,7 +144,7 @@ async fn test_owner_get_set_odd() -> eyre::Result<()> {
     let tx3 = super::tx(1);
     let exp3 = crate::revm::run(set_call.clone(), head.clone(), env1.clone(), tx3.clone()).await?;
     let res3 = super::run(set_call, head.clone(), env1.clone(), tx3).await?;
-    pretty_assertions::assert_eq!(res3, exp3, "set(10) by owner must match revm");
+    super::assert_match(&res3, &exp3, "set(10) by owner");
 
     // set(10) by stranger should revert
     let stranger_set = Call {
@@ -163,7 +163,7 @@ async fn test_owner_get_set_odd() -> eyre::Result<()> {
     )
     .await?;
     let res4 = super::run(stranger_set, head, env1, tx4).await?;
-    pretty_assertions::assert_eq!(res4, exp4, "set() by stranger must match revm");
+    super::assert_match(&res4, &exp4, "set() by stranger");
 
     Ok(())
 }

@@ -38,7 +38,7 @@ async fn test_proxy_delegatecall() -> eyre::Result<()> {
     let exp0 =
         crate::revm::run(deploy_logic.clone(), head.clone(), env.clone(), tx0.clone()).await?;
     let res0 = super::run(deploy_logic, head.clone(), env, tx0).await?;
-    pretty_assertions::assert_eq!(res0, exp0, "deploy Logic must match revm");
+    super::assert_match(&res0, &exp0, "deploy Logic");
 
     let deployed_logic: Acc = res0.0.to();
     assert_eq!(
@@ -67,7 +67,7 @@ async fn test_proxy_delegatecall() -> eyre::Result<()> {
     )
     .await?;
     let res1 = super::run(deploy_proxy, head.clone(), env1, tx1).await?;
-    pretty_assertions::assert_eq!(res1, exp1, "deploy Proxy must match revm");
+    super::assert_match(&res1, &exp1, "deploy Proxy");
 
     let deployed_proxy: Acc = res1.0.to();
     assert_eq!(
@@ -92,7 +92,7 @@ async fn test_proxy_delegatecall() -> eyre::Result<()> {
     let tx2 = super::tx(2);
     let exp2 = crate::revm::run(init_call.clone(), head.clone(), env2.clone(), tx2.clone()).await?;
     let res2 = super::run(init_call, head.clone(), env2, tx2).await?;
-    pretty_assertions::assert_eq!(res2, exp2, "init(42) through proxy must match revm");
+    super::assert_match(&res2, &exp2, "init(42) through proxy");
 
     let env3 = res2.4;
 
@@ -109,7 +109,7 @@ async fn test_proxy_delegatecall() -> eyre::Result<()> {
     let tx3 = super::tx(3);
     let exp3 = crate::revm::run(get_call.clone(), head.clone(), env3.clone(), tx3.clone()).await?;
     let res3 = super::run(get_call, head.clone(), env3, tx3).await?;
-    pretty_assertions::assert_eq!(res3, exp3, "get() through proxy must match revm");
+    super::assert_match(&res3, &exp3, "get() through proxy");
 
     // --- step 5: upgrade() on Proxy directly (not delegatecall) ---
     // Use the state from step 2 (before init) so the proxy is still functional.
@@ -133,7 +133,7 @@ async fn test_proxy_delegatecall() -> eyre::Result<()> {
     )
     .await?;
     let res4 = super::run(upgrade_call, head.clone(), env_pre_init.clone(), tx4).await?;
-    pretty_assertions::assert_eq!(res4, exp4, "upgrade() must match revm");
+    super::assert_match(&res4, &exp4, "upgrade()");
 
     // --- step 6: sending ETH to Proxy triggers receive() which reverts ---
     let eth_call = Call {
@@ -152,7 +152,7 @@ async fn test_proxy_delegatecall() -> eyre::Result<()> {
     )
     .await?;
     let res5 = super::run(eth_call, head, env_pre_init, tx5).await?;
-    pretty_assertions::assert_eq!(res5, exp5, "sending ETH to proxy must match revm");
+    super::assert_match(&res5, &exp5, "sending ETH to proxy");
 
     Ok(())
 }
