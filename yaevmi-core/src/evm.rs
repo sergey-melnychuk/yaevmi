@@ -438,7 +438,9 @@ impl Evm {
                     step.stack = self.stack.len();
                     step.memory = self.memory.len();
                     step.debug.push(format!("cost={cost}"));
-                    step.debug.push(format!("gas_refund={}", self.gas.refund));
+                    if self.gas.refund != 0 {
+                        step.debug.push(format!("gas_refund={}", self.gas.refund));
+                    }
                     state.emit(Event::Step(step));
                 }
                 StepResult::Ok

@@ -286,14 +286,6 @@ impl Executor {
             tx.chain_id = chain.chain_id().await?.into();
         }
 
-        // EIP-7702: sender nonce must be incremented before authorization list processing,
-        // because when authority == sender the auth nonce check uses the post-increment value.
-        state.inc_nonce(&self.call.by, Int::ONE);
-
-        let eip7702_refund =
-            crate::eip7702::apply_authorization_list(&tx, tx.chain_id.as_u64(), state, chain)
-                .await?;
-
         // Pre-transaction validation checks
 
         // EIP-1559: max_fee_per_gas must cover base_fee
@@ -325,6 +317,7 @@ impl Executor {
             .is_some_and(|(c, _)| !c.0.is_empty())
             && state.auth(&self.call.to).is_none();
 
+        // CREATE address uses sender nonce *before* the tx-level increment (YP / EIP-161).
         let mode = if self.call.is_create() && !has_code {
             let nonce = state.nonce(&self.call.by).unwrap_or_default();
             let created = create_address(&self.call.by, nonce.as_u64());
@@ -332,6 +325,14 @@ impl Executor {
         } else {
             CallMode::Call(0, 0)
         };
+
+        // Tx consumes one sender nonce before execution; EIP-7702 auth checks need this first
+        // when authority == sender (post-increment on-chain nonce vs signed tuple nonce).
+        state.inc_nonce(&self.call.by, Int::ONE);
+
+        let eip7702_refund =
+            crate::eip7702::apply_authorization_list(&tx, tx.chain_id.as_u64(), state, chain)
+                .await?;
 
         let (intrinsic, floor, effective_gas_price) = intrinsic(&self.call, &tx, &head, state)?;
         self.effective_gas_price = effective_gas_price;
