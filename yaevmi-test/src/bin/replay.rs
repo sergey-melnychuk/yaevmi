@@ -169,14 +169,22 @@ async fn main() -> eyre::Result<()> {
             );
         }
     }
-    if n > 1 {
-        println!("{ok}/{n} OK");
-    }
-    if gas_total > 0 && ms_total > 0 {
-        println!(
+
+    let ok = if n > 1 {
+        format!("Block: {}, {ok}/{n} OK", head.number.as_u64())
+    } else {
+        String::new()
+    };
+    let stat = if gas_total > 0 && ms_total > 0 {
+        format!(
             "{gas_total} gas, {ms_total}ms: ~{:.2} gas/sec",
             gas_total as f64 * 1000.0 / ms_total as f64
-        );
+        )
+    } else {
+        String::new()
+    };
+    if ok.len() > 0 {
+        println!("{ok}, {stat}");
     }
 
     let _ = cache.sender.take();

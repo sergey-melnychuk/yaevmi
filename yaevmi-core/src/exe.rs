@@ -61,6 +61,9 @@ pub struct CallFrame {
     pub target: (usize, usize),
     /// Gas stipend (2300 for value-bearing CALLs) to exclude from gas return on failure.
     pub stipend: i64,
+    /// True when this frame is a CREATE/CREATE2, false for CALL/STATICCALL/etc.
+    /// Cannot rely on `call.to.is_zero()` because a plain CALL to address 0x0 is valid.
+    pub is_create: bool,
 }
 
 pub fn intrinsic(
@@ -75,11 +78,9 @@ pub fn intrinsic(
     let is_create = call.is_create() && !has_code;
     if is_create {
         total += 32_000;
-        floor += 32_000;
         // EIP-3860: 2 gas per 32-byte word of initcode
         let initcode_cost = 2 * ((call.data.0.len() as i64 + 31) / 32);
         total += initcode_cost;
-        floor += initcode_cost;
     }
     let zeroes = call.data.0.iter().filter(|b| **b == 0).count();
     let non_zeroes = call.data.0.len() - zeroes;
@@ -198,7 +199,7 @@ pub fn finalized(
     let effective_refund = gas.refund.min(gas.spent / 5);
     // EIP-7623: floor gas cost for calldata-heavy transactions
     let final_gas = (gas.spent - effective_refund).max(0).max(floor) as u64;
-    //eprintln!("FINALIZED: limit={} spent={} refund={} eff_refund={effective_refund} floor={floor} final_gas={final_gas}", gas.limit, gas.spent, gas.refund);
+
     let returned_gas = (gas.limit.max(0) as u64).saturating_sub(final_gas);
     let mul = lift(|[a, b]| a * b);
     let sub = lift(|[a, b]| a - b);
@@ -493,7 +494,7 @@ impl Executor {
 
                     // Do not emit synthetic STOP
 
-                    let is_create = this.call.is_create();
+                    let is_create = this.is_create;
                     let gas = this.evm.gas;
                     result = Some(if is_create {
                         CallResult::Created {
@@ -731,7 +732,7 @@ impl Executor {
                     self.callstack.push(frame);
                 }
                 StepResult::Return(ret) => {
-                    let is_create = this.call.is_create();
+                    let is_create = this.is_create;
                     result = Some(if is_create {
                         let deploy_cost = CODE_DEPOSIT_GAS * ret.len() as i64;
                         // EIP-3541: reject code starting with 0xEF
@@ -921,6 +922,7 @@ async fn prepare(
             this,
         }
     };
+    let is_create = matches!(mode, CallMode::Create(_) | CallMode::Create2(_));
     let checkpoint = state.checkpoint();
     Ok(CallFrame {
         call,
@@ -929,5 +931,6 @@ async fn prepare(
         checkpoint,
         target: (0, 0),
         stipend: 0,
+        is_create,
     })
 }
