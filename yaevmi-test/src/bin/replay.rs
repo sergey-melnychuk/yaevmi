@@ -71,7 +71,7 @@ async fn main() -> eyre::Result<()> {
     std::fs::create_dir_all("fetch")?;
     let path = format!("fetch/{}.json", block);
     let fetches = Path::new(&path);
-    let block = if fetches.exists() {
+    let block = if fetches.exists() && index.is_none() {
         let file = File::open(&fetches)?;
         let mut reader = BufReader::new(file);
         let mut content = String::new();
@@ -185,14 +185,14 @@ async fn main() -> eyre::Result<()> {
             println!(
                 "{hash} [type:{ty}]: FAIL={}:{} [{}/{n}, {stats}]\n{}",
                 head.number.as_u64(),
-                i,
+                index.unwrap_or(i),
                 i + 1,
                 violations.join("\n")
             );
         }
     }
 
-    if !fetches.exists() {
+    if !fetches.exists() && index.is_none() {
         let fetched = std::mem::take(&mut cache.fetched);
         let file = File::create(&fetches)?;
         let mut writer = BufWriter::new(file);
@@ -452,6 +452,9 @@ mod live {
         ctx.block.basefee = head.base_fee.as_u64();
         ctx.block.prevrandao = Some(to_b256(&head.prevrandao));
         ctx.cfg.chain_id = chain_id;
+
+        // let fork = revm::primitives::hardfork::SpecId::OSAKA;
+        // ctx.cfg.set_spec_and_mainnet_gas_params(fork);
 
         let inspector = Tracer {
             tx: Some(sender),
