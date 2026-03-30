@@ -162,7 +162,9 @@ async fn main() -> eyre::Result<()> {
             ok += 1;
         } else {
             println!(
-                "{hash} [type:{ty}]: FAIL: [{}/{n}, {ms}ms/{}ms, fetches:{fetches}/{fetching}ms]\n{}",
+                "{hash} [type:{ty}]: FAIL={}:{} [{}/{n}, {ms}ms/{}ms, fetches:{fetches}/{fetching}ms]\n{}",
+                head.number.as_u64(),
+                i,
                 i + 1,
                 ms - fetching,
                 violations.join("\n")
@@ -327,7 +329,7 @@ mod live {
             }
         }
 
-        fn step_end(&mut self, interp: &mut Interpreter<EthInterpreter>, ctx: &mut CTX) {
+        fn step_end(&mut self, interp: &mut Interpreter<EthInterpreter>, _ctx: &mut CTX) {
             let gas = interp.gas.remaining();
             let cost = self.gas - gas;
 
@@ -360,13 +362,13 @@ mod live {
                     let balance = interp.stack.peek(0).unwrap_or_default();
                     step.debug.push(format!("BALANCE: {balance:0x}"));
                 }
-                let target = interp.input.target_address;
-                let balance = ctx
-                    .balance(interp.input.target_address)
-                    .map(|state| state.data)
-                    .unwrap_or_default();
-                step.debug
-                    .push(format!("TARGET: {target:0x} (balance={balance:0x})"));
+                // let target = interp.input.target_address;
+                // let balance = ctx
+                //     .balance(interp.input.target_address)
+                //     .map(|state| state.data)
+                //     .unwrap_or_default();
+                // step.debug
+                //     .push(format!("TARGET: {target:0x} (balance={balance:0x})"));
 
                 if let Some(tx) = self.tx.as_ref() {
                     if tx.blocking_send(step).is_err() {

@@ -199,7 +199,7 @@ pub fn finalized(
     let effective_refund = gas.refund.min(gas.spent / 5);
     // EIP-7623: floor gas cost for calldata-heavy transactions
     let final_gas = (gas.spent - effective_refund).max(0).max(floor) as u64;
-
+    // eprintln!("FINALIZED: limit={} spent={} refund={} eff_refund={effective_refund} floor={floor} final_gas={final_gas}", gas.limit, gas.spent, gas.refund);
     let returned_gas = (gas.limit.max(0) as u64).saturating_sub(final_gas);
     let mul = lift(|[a, b]| a * b);
     let sub = lift(|[a, b]| a - b);
@@ -403,6 +403,39 @@ impl Executor {
         }
         transfer(&self.call, &mode, state);
         let _ = frame.evm.gas_charge(intrinsic);
+
+        // Top-level call to a precompile: run inline, skip the step loop.
+        if !frame.is_create && is_precompile(&self.call.to) {
+            let (ok, out, gas_used) =
+                crate::pre::run(self.call.to.as_u64(), &self.call.data.0, frame.evm.gas_remaining());
+            let _ = frame.evm.gas_charge(gas_used);
+            frame.evm.apply(state);
+
+            let status = if ok { Int::ONE } else { Int::ZERO };
+            if !ok {
+                state.revert_to(frame.checkpoint);
+            }
+
+            let mut result = CallResult::Done {
+                status,
+                ret: out.into(),
+                gas: frame.evm.gas,
+            };
+            result.gas_mut().refund += eip7702_refund;
+            let gas_final = finalized(
+                &self.call,
+                &tx,
+                &head,
+                effective_gas_price,
+                &result,
+                state,
+                floor,
+            );
+            result.gas_mut().finalized = gas_final;
+            state.apply();
+            return Ok(result);
+        }
+
         self.callstack.push(frame);
 
         let mut result: Option<CallResult> = None;
@@ -448,13 +481,11 @@ impl Executor {
                         // any portion the child did not consume flows back to the
                         // caller (this matches geth / revm behaviour).
                         let return_gas = (gas.limit - gas.spent).max(0);
+                        // eprintln!("DONE: depth={} status={} child_limit={} child_spent={} child_refund={} return_gas={} parent_spent_before={} parent_spent_after={} stipend={}",
+                        //     this.ctx.depth, status.as_u8(), gas.limit, gas.spent, gas.refund, return_gas, this.evm.gas.spent, this.evm.gas.spent - return_gas, this.stipend);
                         this.evm.gas.spent -= return_gas;
                         // Only propagate refund on success; reverted refunds are discarded.
                         if !status.is_zero() {
-                            // eprintln!(
-                            //     "REFUND_PROP: depth={} child_refund={} parent_before={}",
-                            //     this.ctx.depth, gas.refund, this.evm.gas.refund
-                            // );
                             this.evm.gas.refund += gas.refund;
                         }
                         this.evm.apply(state);
@@ -475,6 +506,8 @@ impl Executor {
 
                         let _ = this.evm.push(addr.to());
                         let return_gas = (gas.limit - gas.spent).max(0);
+                        // eprintln!("CREATED: depth={} child_limit={} child_spent={} child_refund={} return_gas={} parent_spent_before={} parent_spent_after={}",
+                        //     this.ctx.depth, gas.limit, gas.spent, gas.refund, return_gas, this.evm.gas.spent, this.evm.gas.spent - return_gas);
                         this.evm.gas.spent -= return_gas;
                         this.evm.gas.refund += gas.refund;
                         this.evm.apply(state);

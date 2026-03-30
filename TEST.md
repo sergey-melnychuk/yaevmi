@@ -50,3 +50,16 @@ Remaining edge cases:
 ---
 
 For 12 days (less than 2 weeks!) of development I'd say it is "good enough for now", shadowing live mainnet transactions might give better insights about what is enough.
+
+---
+
+Mainnet replay:
+
+```
+# copy the specific version of the binary to isolate it first
+cp ./target/release/replay .
+
+for block in {24765791..24765890}; do .replay $block; done > 100.log 2>/dev/null &
+
+for block in {24766061..24767061}; do .replay $block; done > 1000.log 2>/dev/null &
+```
