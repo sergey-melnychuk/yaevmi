@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 
 ## copy the specific version of the binary to isolate it first
 cargo build --release --bin replay
