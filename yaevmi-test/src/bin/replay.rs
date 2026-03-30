@@ -65,7 +65,7 @@ async fn main() -> eyre::Result<()> {
         }
     };
     let head = rpc.head(block).await?;
-    println!("Block: {} / {}", head.number.as_u64(), head.hash);
+    println!("Begin: {} / {}", head.number.as_u64(), head.hash);
     rpc.reset(block - 1).await?;
 
     let (ytx, mut yrx) = mpsc::channel(4 * 1024 * 1024);
