@@ -1,0 +1,12 @@
+#!/bin/sh
+
+## copy the specific version of the binary to isolate it first
+cargo build --release --bin replay
+rm -rf ./bin && mkdir -p bin
+cp ./target/release/replay ./bin
+
+for block in {24765791..24765890}; do bin/replay $block; done > 100.log 2>/dev/null &
+## cat 100.log | grep FAIL | cut -d '=' -f 2 | cut -d ' ' -f 1 >> todo.log
+
+for block in {24766061..24766361}; do bin/replay $block; done > 300.log 2>/dev/null &
+## cat 300.log | grep FAIL | cut -d '=' -f 2 | cut -d ' ' -f 1 >> todo.log

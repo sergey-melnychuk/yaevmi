@@ -50,21 +50,3 @@ Remaining edge cases:
 ---
 
 For 12 days (less than 2 weeks!) of development I'd say it is "good enough for now", shadowing live mainnet transactions might give better insights about what is enough.
-
----
-
-Mainnet replay:
-
-```
-# copy the specific version of the binary to isolate it first
-cargo build --release --bin replay
-cp ./target/release/replay ./bin
-
-nohup bash -c "for block in {24765791..24765890}; do bin/replay $block; done" > 100.log 2>/dev/null &
-
-nohup bash -c "for block in {24766061..24766361}; do bin/replay $block; done" > 300.log 2>/dev/null &
-
-cat 100.log | grep FAIL | cut -d '=' -f 2 | cut -d ' ' -f 1 >> todo.log
-
-cat 300.log | grep FAIL | cut -d '=' -f 2 | cut -d ' ' -f 1 >> todo.log
-```
