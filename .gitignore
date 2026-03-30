@@ -9,3 +9,4 @@ bin/
 .cursor/
 
 .env
+fetch/

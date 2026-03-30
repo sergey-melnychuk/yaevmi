@@ -361,9 +361,7 @@ pub mod tests {
         fn put(&mut self, _: &Acc, _: &Int, _: Int) -> Option<Int> {
             None
         }
-        fn init(&mut self, _: &Acc, _: &Int, _: Int) -> Int {
-            Int::ZERO
-        }
+        fn init(&mut self, _: &Acc, _: &Int, _: Int) {}
         fn tget(&mut self, _: &Acc, _: &Int) -> Option<Int> {
             None
         }

@@ -56,7 +56,7 @@ pub async fn run(
     for (acc, info, storage) in env {
         state.insert_account(acc, info);
         for (key, val) in storage {
-            state.insert_storage(acc, key, val);
+            state.init(acc, key, val);
         }
     }
 

@@ -39,11 +39,9 @@ impl Rpc {
         })
     }
 
-    pub async fn reset(&mut self, number: u64) -> eyre::Result<Head> {
-        let head = head(&self.http, &self.url, format!("0x{:x}", number)).await?;
-        self.block_number = head.number.as_u64();
-        self.block_hash = head.hash;
-        Ok(head)
+    pub fn reset(&mut self, number: u64, hash: Int) {
+        self.block_number = number;
+        self.block_hash = hash;
     }
 
     pub async fn chain_id(&self) -> eyre::Result<u64> {

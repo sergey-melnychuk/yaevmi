@@ -1,3 +1,4 @@
+use serde::{Deserialize, Serialize};
 use yaevmi_base::{Acc, Int};
 use yaevmi_misc::buf::Buf;
 
@@ -21,36 +22,61 @@ pub trait Chain {
     async fn chain_id(&self) -> eyre::Result<u64>;
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub enum Fetched {
+    Account(Acc, Account),
+    State(Acc, Int, Int),
+    Hash(u64, Int),
+    Block(Block),
+}
+
 pub async fn fetch(f: Fetch, state: &mut impl State, chain: &impl Chain) -> Result<()> {
     match f {
-        Fetch::Account(acc) => {
-            let account = chain.acc(&acc).await?;
-            state.merge(&acc, account);
-        }
-        Fetch::Balance(acc) => {
-            let account = chain.acc(&acc).await?;
-            state.merge(&acc, account);
-        }
-        Fetch::Nonce(acc) => {
-            let account = chain.acc(&acc).await?;
-            state.merge(&acc, account);
-        }
-        Fetch::Code(acc) => {
-            let account = chain.acc(&acc).await?;
-            state.merge(&acc, account);
+        Fetch::Account(acc)
+            | Fetch::Balance(acc) 
+            | Fetch::Nonce(acc) 
+            | Fetch::Code(acc) => {
+            if state.is_offline() {
+                let Some(Fetched::Account(_, account)) = state.next_fetched() else {
+                    return Err(eyre::eyre!("!").into());
+                };
+                state.merge(&acc, account.clone());
+            } else {
+                let account = chain.acc(&acc).await?;
+                state.merge(&acc, account.clone());
+                state.save_fetched(Fetched::Account(acc, account));
+            }
+            Ok(())
         }
         Fetch::BlockHash(number) => {
-            let hash = chain
-                .head(number)
-                .await
-                .map(|head| head.hash)
-                .unwrap_or(Int::ZERO);
-            state.hash(number, hash);
+            if state.is_offline() {
+                let Some(Fetched::Hash(number, hash)) = state.next_fetched() else {
+                    return Err(eyre::eyre!("!").into());
+                };
+                state.hash(number, hash);
+            } else {
+                let hash = chain
+                    .head(number)
+                    .await
+                    .map(|head| head.hash)
+                    .unwrap_or(Int::ZERO);
+                state.hash(number, hash);
+                state.save_fetched(Fetched::Hash(number, hash));
+            }
+            Ok(())
         }
         Fetch::StateCell(acc, key) => {
-            let val = chain.get(&acc, &key).await?;
-            state.init(&acc, &key, val);
+            if state.is_offline() {
+                let Some(Fetched::State(_, _, val)) = state.next_fetched() else {
+                    return Err(eyre::eyre!("!").into());
+                };
+                state.init(&acc, &key, val);
+            } else {
+                let val = chain.get(&acc, &key).await?;
+                state.init(&acc, &key, val);
+                state.save_fetched(Fetched::State(acc, key, val));
+            }
+            Ok(())
         }
     }
-    Ok(())
 }

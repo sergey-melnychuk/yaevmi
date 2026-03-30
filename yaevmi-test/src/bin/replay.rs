@@ -1,4 +1,4 @@
-use std::time::Instant;
+use std::{fs::File, io::{BufReader, BufWriter, Read, Write}, path::Path, time::Instant};
 
 use alloy_provider::ProviderBuilder;
 use eyre::OptionExt;
@@ -7,9 +7,9 @@ use yaevmi_base::int;
 use yaevmi_core::{
     cache::Cache,
     call::Receipt,
-    chain::Chain,
+    chain::{Chain, Fetched},
     exe::{CallResult, Executor},
-    rpc::Rpc,
+    rpc::Rpc, state::State,
 };
 use yaevmi_misc::hex::parse_vec;
 
@@ -64,15 +64,35 @@ async fn main() -> eyre::Result<()> {
             (block, None)
         }
     };
-    let head = rpc.head(block).await?;
-    println!("Begin: {} / {}", head.number.as_u64(), head.hash);
-    rpc.reset(block - 1).await?;
 
     let (ytx, mut yrx) = mpsc::channel(4 * 1024 * 1024);
     let mut cache = Cache::with_sender(ytx);
 
-    let (rtx, mut rrx) = tokio::sync::mpsc::channel(4096);
+    std::fs::create_dir_all("fetch")?;
+    let path = format!("fetch/{}.json", block);
+    let fetches = Path::new(&path);
+    let block = if fetches.exists() {
+        let file = File::open(&fetches)?;
+        let mut reader = BufReader::new(file);
+        let mut content = String::new();
+        reader.read_to_string(&mut content)?;
+        let fetched: Vec<Fetched> = serde_json::from_str(&content)?;
+        let Some(Fetched::Block(block)) = fetched.first().cloned() else {
+            eyre::bail!("Cannot find stored block");
+        };
+        cache.prefetched(fetched);
+        block
+    } else {
+        let block = rpc.block(block).await?;
+        cache.save_fetched(Fetched::Block(block.clone()));
+        block
+    };
 
+    let head = block.head.clone();
+    println!("Begin: {} / {}", head.number.as_u64(), head.hash);
+    rpc.reset(head.number.as_u64() - 1, head.parent_hash);
+
+    let (rtx, mut rrx) = tokio::sync::mpsc::channel(4096);
     let handle = tokio::spawn(async move {
         let is_trace = std::env::var("TRACE").is_ok();
         if is_trace {
@@ -103,7 +123,7 @@ async fn main() -> eyre::Result<()> {
         }
     });
 
-    let txs = rpc.block(head.number.as_u64()).await?.txs;
+    let txs = block.txs.clone();
     let pack = (txs.clone(), head.clone(), index, chain_id);
 
     let provider = ProviderBuilder::new().connect(&url).await?;
@@ -151,25 +171,33 @@ async fn main() -> eyre::Result<()> {
         let ty = receipt.r#type.as_u8();
 
         let violations = check(result, receipt);
+        let stats = if fetching > 0 {
+            format!("{ms}ms/{}ms, fetches:{fetches}/{fetching}ms", ms - fetching)
+        } else {
+            format!("{ms}ms")
+        };
         if violations.is_empty() {
             gas_total += gas;
             ms_total += ms - fetching;
-            println!(
-                "{hash} [type:{ty}]: OK [{}/{n}, {gas} gas, {ms}ms/{}ms, fetches:{fetches}/{fetching}ms]",
-                i + 1,
-                ms - fetching
-            );
+            println!("{hash} [type:{ty}]: OK [{}/{n}, {gas} gas, {stats}]", i + 1);
             ok += 1;
         } else {
             println!(
-                "{hash} [type:{ty}]: FAIL={}:{} [{}/{n}, {ms}ms/{}ms, fetches:{fetches}/{fetching}ms]\n{}",
+                "{hash} [type:{ty}]: FAIL={}:{} [{}/{n}, {stats}]\n{}",
                 head.number.as_u64(),
                 i,
                 i + 1,
-                ms - fetching,
                 violations.join("\n")
             );
         }
+    }
+
+    if !fetches.exists() {
+        let fetched = std::mem::take(&mut cache.fetched);
+        let file = File::create(&fetches)?;
+        let mut writer = BufWriter::new(file);
+        let content = serde_json::to_vec(&fetched)?;
+        writer.write_all(&content)?;
     }
 
     let ok = if n > 1 {

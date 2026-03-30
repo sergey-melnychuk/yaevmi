@@ -1,8 +1,9 @@
+use serde::{Deserialize, Serialize};
 use yaevmi_misc::buf::Buf;
 
-use crate::{Acc, Head, Int, trace::Event};
+use crate::{Acc, Head, Int, chain::Fetched, trace::Event};
 
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
 pub struct Account {
     pub value: Int,
     pub nonce: Int,
@@ -12,7 +13,7 @@ pub struct Account {
 pub trait State {
     fn get(&mut self, acc: &Acc, key: &Int) -> Option<(Int, Int)>;
     fn put(&mut self, acc: &Acc, key: &Int, val: Int) -> Option<Int>;
-    fn init(&mut self, acc: &Acc, key: &Int, val: Int) -> Int;
+    fn init(&mut self, acc: &Acc, key: &Int, val: Int);
 
     fn tget(&mut self, acc: &Acc, key: &Int) -> Option<Int>;
     fn tput(&mut self, acc: Acc, key: Int, val: Int) -> Option<Int>;
@@ -49,6 +50,11 @@ pub trait State {
 
     fn set_depth(&mut self, _depth: usize) {}
     fn emit(&mut self, event: Event) -> usize;
+
+    fn save_fetched(&mut self, _fetched: Fetched) {}
+    fn next_fetched(&mut self) -> Option<Fetched> { None }
+    fn prefetched(&mut self, _: Vec<Fetched>) {}
+    fn is_offline(&self) -> bool { false }
 
     fn reset(&mut self) {}
 

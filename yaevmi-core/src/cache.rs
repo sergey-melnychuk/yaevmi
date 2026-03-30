@@ -1,9 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::{
-    call::Head,
-    state::{Account, State},
-    trace::{Event, Step, Target, Trace},
+    call::Head, chain::Fetched, state::{Account, State}, trace::{Event, Step, Target, Trace}
 };
 use futures::channel::mpsc;
 use yaevmi_base::{Acc, Int, math::lift};
@@ -67,6 +65,9 @@ pub struct Cache {
     pub logs: Vec<(Buf, Vec<Int>)>,
     pub events: Vec<Trace>,
     pub sender: Option<mpsc::Sender<Step>>,
+    pub fetched: Vec<Fetched>,
+    offline: bool,
+    index: usize,
 }
 
 impl Cache {
@@ -82,18 +83,8 @@ impl Cache {
     }
 
     pub fn insert_account(&mut self, addr: Acc, account: Account) {
-        self.accounts.insert(addr, AccountEntry::new(account));
-    }
-
-    pub fn insert_storage(&mut self, addr: Acc, key: Int, val: Int) {
         let entry = self.accounts.entry(addr).or_default();
-        entry.storage.insert(
-            key,
-            Slot {
-                original: val,
-                current: val,
-            },
-        );
+        entry.account = account;
     }
 
     pub fn account(&self, addr: &Acc) -> Option<&Account> {
@@ -152,7 +143,7 @@ impl State for Cache {
         Some(prev)
     }
 
-    fn init(&mut self, acc: &Acc, key: &Int, val: Int) -> Int {
+    fn init(&mut self, acc: &Acc, key: &Int, val: Int) {
         let entry = self.accounts.entry(*acc).or_default();
         entry.storage.insert(
             *key,
@@ -161,7 +152,6 @@ impl State for Cache {
                 current: val,
             },
         );
-        val
     }
 
     fn tget(&mut self, acc: &Acc, key: &Int) -> Option<Int> {
@@ -390,6 +380,24 @@ impl State for Cache {
             reverted: false,
         });
         id
+    }
+
+    fn save_fetched(&mut self, fetched: Fetched) {
+        self.fetched.push(fetched);
+    }
+
+    fn next_fetched(&mut self) -> Option<Fetched> {
+        self.index += 1; // skip first block fetch
+        self.fetched.get(self.index).cloned()
+    }
+
+    fn prefetched(&mut self, fetched: Vec<Fetched>) {
+        self.fetched = fetched;
+        self.offline = true;
+    }
+
+    fn is_offline(&self) -> bool {
+        self.offline
     }
 
     fn checkpoint(&mut self) -> usize {
