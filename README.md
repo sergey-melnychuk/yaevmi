@@ -2,6 +2,8 @@
 
 **(Yield-aware | Yet another) EVM implementation** — in Rust.
 
+Pronounced *ye-vi-em* — "ye" as in "yes", not "why-vi-em".
+
 **[Live Demo](https://sergey-melnychuk.github.io/yevm)**
 
 ## Goals

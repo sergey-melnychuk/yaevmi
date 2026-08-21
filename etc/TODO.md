@@ -6,10 +6,12 @@ FAST blocks: >1 GigaGas/second
 ./target/release/bench 25694118
 ./target/release/bench 25702265
 ./target/release/bench 25705775
+./target/release/bench 25806442
 
-SLOW blocks:
+SLOW blocks: <500 MegaGas/second
 
-TBD
+./target/release/bench 25806484
+./target/release/bench 25806507
 
 ---
 
