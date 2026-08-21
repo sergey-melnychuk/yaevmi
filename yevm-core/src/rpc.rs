@@ -96,11 +96,13 @@ impl Chain for Rpc {
     }
 
     async fn acc(&self, acc: &Acc) -> eyre::Result<Account> {
-        // TODO: consider firing sub-calls concurrently to speed this up
+        // TODO: consider a single batched JSON-RPC request to collapse 3 round-trips into 1
+        let (value, nonce, code) =
+            futures::try_join!(self.balance(acc), self.nonce(acc), self.code(acc))?;
         Ok(Account {
-            value: self.balance(acc).await?,
-            nonce: self.nonce(acc).await?.into(),
-            code: self.code(acc).await?,
+            value,
+            nonce: nonce.into(),
+            code,
         })
     }
 
