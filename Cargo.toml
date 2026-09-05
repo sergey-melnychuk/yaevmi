@@ -7,6 +7,7 @@ members = [
     "yevm-gate",
     "yevm-lens",
     "yevm-misc",
+    "yevm-reth",
     "yevm-test",
     "yevm-wasm",
 ]

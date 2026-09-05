@@ -16,6 +16,7 @@ serde_json.workspace = true
 yevm-base.workspace = true
 yevm-core.workspace = true
 yevm-misc.workspace = true
+yevm-reth = { path = "../yevm-reth", optional = true }
 
 revm = { version = "36.0", features = ["alloydb"] }
 alloy-eip7702 = { version = "0.6.3", features = ["k256"] }
@@ -24,6 +25,12 @@ alloy-provider = { version = "1.0", default-features = true }
 tokio = { version = "1.50", features = ["full"] }
 futures = "0.3"
 dotenv = "0.15"
+
+[features]
+# Off by default: pulls in reth's full dependency tree (see yevm-reth).
+# Enables `replay --with-reth <datadir>` to read state directly from a
+# local reth MDBX datadir instead of RPC.
+reth = ["dep:yevm-reth"]
 
 [dev-dependencies]
 k256 = { version = "0.13", features = ["ecdsa"] }

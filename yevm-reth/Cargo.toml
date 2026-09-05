@@ -1,0 +1,27 @@
+[package]
+name = "yevm-reth"
+version = "0.1.0"
+edition = "2024"
+description = "Chain impl reading Ethereum state directly from a local reth MDBX datadir, bypassing JSON-RPC for latest-block state (balance/nonce/code/storage)."
+license = "LicenseRef-PolyForm-Noncommercial-1.0.0"
+repository = "https://github.com/sergey-melnychuk/yevm"
+publish = false
+
+[dependencies]
+yevm-base.workspace = true
+yevm-core.workspace = true
+yevm-misc.workspace = true
+eyre.workspace = true
+async-trait.workspace = true
+alloy-primitives = { version = "1.5", default-features = false }
+# For the `verify`/`dump` bins' runtime, and to detect/reuse an already-
+# running tokio handle when building reth's `Runtime` (see `minimal_runtime`).
+tokio = { version = "1.50.0", features = ["rt-multi-thread", "macros"] }
+alloy-consensus = { version = "2.3", default-features = false }
+
+# Not published to crates.io in a consumable form -- reth's own examples
+# consume these via a pinned git tag. Match this tag to `reth --version`
+# on the node this points at (bump alongside it).
+reth-ethereum = { git = "https://github.com/paradigmxyz/reth", tag = "v2.5.1", features = ["node"] }
+reth-node-types = { git = "https://github.com/paradigmxyz/reth", tag = "v2.5.1" }
+reth-db = { git = "https://github.com/paradigmxyz/reth", tag = "v2.5.1", default-features = false }

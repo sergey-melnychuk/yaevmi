@@ -11,22 +11,111 @@ use futures::{StreamExt, channel::mpsc};
 use yevm_base::{Acc, Int, int, math::lift};
 use yevm_core::{
     cache::Cache,
-    call::Receipt,
+    call::{Block, Head, Receipt},
     chain::{Chain, Fetched},
     exe::{CallResult, Executor, pre_block},
     rpc::Rpc,
     state::{Account, State},
     trace::filter,
 };
-use yevm_misc::hex::parse_vec;
+use yevm_misc::{buf::Buf, hex::parse_vec};
 
 const YEVM_RPC_URL: &str = "YEVM_RPC_URL";
 
 // ./target/release/replay - replay the latest block
 // ./target/release/replay <block> - replay the block number
 // ./target/release/replay <block>:<index> | <hash> - replay specific transaction
+// ./target/release/replay watch - loop forever, replaying each new block as it
+//   lands (polls for the tip to move); ignores any block/tx selection -- always
+//   tracks latest. Keeps the same `Rpc`/`RethDb` alive across blocks instead of
+//   reopening per run, which is where startup cost (esp. --with-reth) is paid.
 // ./target/release/replay ... --skip-check - do not check against revm
 // ./target/release/replay ... --skip-cache - ignore cached state
+// ./target/release/replay ... --skip-stats - do not print per-tx stats lines
+// ./target/release/replay ... --with-reth <datadir> - read state from a local reth
+//   MDBX datadir instead of RPC (needs `cargo build --features reth`). Reaches
+//   any block within the node's retained account/storage history (see
+//   `reth.toml`'s prune distance, ~10064 blocks/1.4 days on a --minimal node by
+//   default), not just the latest -- see yevm-reth's `RethDb::pin`. Requesting
+//   something older just fails with reth's own error, not a pre-emptive guess.
+
+/// Dispatches `Chain` calls to whichever backend is active, so `pre_block`/`Executor::run`
+/// don't need to know or care which one is in use. Borrows both variants (rather than
+/// owning `RethDb`) so `watch` mode can rebuild a fresh `AnyChain` each block while still
+/// calling `RethDb::refresh()`/`best_block_number()` on the same long-lived instance
+/// between iterations.
+enum AnyChain<'a> {
+    Rpc(&'a Rpc),
+    #[cfg(feature = "reth")]
+    Reth(&'a yevm_reth::RethDb),
+}
+
+#[async_trait::async_trait]
+impl Chain for AnyChain<'_> {
+    async fn get(&self, acc: &Acc, key: &Int) -> eyre::Result<Int> {
+        match self {
+            Self::Rpc(c) => c.get(acc, key).await,
+            #[cfg(feature = "reth")]
+            Self::Reth(c) => c.get(acc, key).await,
+        }
+    }
+
+    async fn acc(&self, acc: &Acc) -> eyre::Result<Account> {
+        match self {
+            Self::Rpc(c) => c.acc(acc).await,
+            #[cfg(feature = "reth")]
+            Self::Reth(c) => c.acc(acc).await,
+        }
+    }
+
+    async fn code(&self, acc: &Acc) -> eyre::Result<(Buf, Int)> {
+        match self {
+            Self::Rpc(c) => c.code(acc).await,
+            #[cfg(feature = "reth")]
+            Self::Reth(c) => c.code(acc).await,
+        }
+    }
+
+    async fn nonce(&self, acc: &Acc) -> eyre::Result<u64> {
+        match self {
+            Self::Rpc(c) => c.nonce(acc).await,
+            #[cfg(feature = "reth")]
+            Self::Reth(c) => c.nonce(acc).await,
+        }
+    }
+
+    async fn balance(&self, acc: &Acc) -> eyre::Result<Int> {
+        match self {
+            Self::Rpc(c) => c.balance(acc).await,
+            #[cfg(feature = "reth")]
+            Self::Reth(c) => c.balance(acc).await,
+        }
+    }
+
+    async fn head(&self, number: u64) -> eyre::Result<Head> {
+        match self {
+            Self::Rpc(c) => c.head(number).await,
+            #[cfg(feature = "reth")]
+            Self::Reth(c) => c.head(number).await,
+        }
+    }
+
+    async fn block(&self, number: u64) -> eyre::Result<Block> {
+        match self {
+            Self::Rpc(c) => c.block(number).await,
+            #[cfg(feature = "reth")]
+            Self::Reth(c) => c.block(number).await,
+        }
+    }
+
+    async fn chain_id(&self) -> eyre::Result<u64> {
+        match self {
+            Self::Rpc(c) => c.chain_id().await,
+            #[cfg(feature = "reth")]
+            Self::Reth(c) => c.chain_id().await,
+        }
+    }
+}
 
 #[tokio::main]
 async fn main() {
@@ -44,14 +133,72 @@ async fn run() -> eyre::Result<()> {
     let mut rpc = Rpc::latest(url.clone()).await?;
     let chain_id = rpc.chain_id().await?;
 
-    let skip_check = std::env::args().skip(1).any(|arg| arg == "--skip-check");
-    let skip_cache = std::env::args().skip(1).any(|arg| arg == "--skip-cache");
+    // `--with-reth <datadir>` takes a value, so strip the flag *and* its
+    // value before any other arg is scanned -- otherwise the datadir path
+    // would be mistaken for the positional block/hash argument below.
+    let raw_args: Vec<String> = std::env::args().collect();
+    let with_reth: Option<String> = match raw_args.iter().position(|a| a == "--with-reth") {
+        Some(i) => Some(
+            raw_args
+                .get(i + 1)
+                .cloned()
+                .ok_or_else(|| eyre::eyre!("--with-reth requires a <datadir> argument"))?,
+        ),
+        None => None,
+    };
+    let args: Vec<String> = {
+        let mut v = raw_args;
+        if let Some(i) = v.iter().position(|a| a == "--with-reth") {
+            v.drain(i..=i + 1);
+        }
+        v
+    };
 
-    let (block, index) = {
-        let arg = std::env::args()
-            .filter(|arg| !arg.starts_with("--"))
-            .nth(1)
-            .unwrap_or_else(|| String::from("latest"));
+    #[cfg(not(feature = "reth"))]
+    if with_reth.is_some() {
+        eyre::bail!("--with-reth requires building with `cargo build --features reth`");
+    }
+
+    // `RethDb` is pinned to a specific block's pre-state via `pin()` below,
+    // right before that block gets replayed -- for "latest", not the tip
+    // itself here (see yevm-reth's module docs on `pin`/`history_by_block_
+    // number` for what's actually reachable). `reth_latest` stays `None`
+    // (and thus a no-op below) when the feature isn't compiled in.
+    #[cfg(feature = "reth")]
+    let reth_db: Option<yevm_reth::RethDb> = with_reth
+        .as_deref()
+        .map(yevm_reth::RethDb::latest)
+        .transpose()?;
+    #[cfg(feature = "reth")]
+    let reth_latest: Option<u64> = reth_db
+        .as_ref()
+        .map(|db| db.best_block_number())
+        .transpose()?
+        .map(|tip| tip + 1);
+    #[cfg(not(feature = "reth"))]
+    let reth_latest: Option<u64> = None;
+
+    // `--with-reth` always targets `tip + 1`, a different block on every
+    // run -- the on-disk `fetch/<block>.json` cache wouldn't apply run to
+    // run, and there is no receipt/revm-comparison path wired up for it
+    // (see AnyChain above), so both are forced on rather than left to
+    // silently do the wrong thing if the user forgets the flags.
+    let skip_check = with_reth.is_some() || args.iter().skip(1).any(|arg| arg == "--skip-check");
+    let skip_cache = with_reth.is_some() || args.iter().skip(1).any(|arg| arg == "--skip-cache");
+    let skip_stats = args.iter().skip(1).any(|arg| arg == "--skip-stats");
+
+    let arg = args
+        .iter()
+        .filter(|arg| !arg.starts_with("--"))
+        .nth(1)
+        .cloned()
+        .unwrap_or_else(|| String::from("latest"));
+    let watch = arg == "watch";
+
+    let (mut number, mut index) = if watch {
+        (0u64, None) // resolved for real at the top of the loop below
+    } else {
+        let latest = reth_latest.unwrap_or(rpc.block_number);
 
         if arg.starts_with("0x") {
             if parse_vec(&arg).is_err() {
@@ -66,7 +213,7 @@ async fn run() -> eyre::Result<()> {
             let mut split = arg.split(":");
             let block = split.next().ok_or_eyre("invalid block:index format")?;
             let block: u64 = if block == "latest" {
-                rpc.block_number
+                latest
             } else {
                 block.parse()?
             };
@@ -75,241 +222,348 @@ async fn run() -> eyre::Result<()> {
                 .ok_or_eyre("invalid block:index format")?
                 .parse()?;
             (block, Some(index))
+        } else if arg == "latest" {
+            (latest, None)
         } else {
-            let block: u64 = if arg == "latest" {
-                rpc.block_number
-            } else {
-                arg.parse()?
-            };
-            (block, None)
+            (arg.parse()?, None)
         }
     };
 
-    let (ytx, mut yrx) = mpsc::channel(4 * 1024 * 1024);
-    let filter = if !skip_check {
-        filter::STEP
-    } else {
-        filter::NONE
-    };
-    let mut cache = Cache::with_sender(ytx, filter);
+    // No pre-check against what `--with-reth` can or can't replay here --
+    // `RethDb::pin` (called per block below) actually tries, via
+    // `factory.latest()`/`history_by_block_number()`, and its own error
+    // (via `?`) is what reports an unreachable block, rather than a guess
+    // made in advance about what "should" work.
 
-    // TODO: make single-tx also replayable? just save all fetches to block:index.js
-    std::fs::create_dir_all("fetch")?;
-    let path = format!("fetch/{}.json", block);
-    let fetches = Path::new(&path);
-    let block = if !skip_cache && fetches.exists() && index.is_none() {
-        let file = File::open(fetches)?;
-        let mut reader = BufReader::new(file);
-        let mut content = String::new();
-        reader.read_to_string(&mut content)?;
-        let fetched: Vec<Fetched> = serde_json::from_str(&content)?;
-        let Some(Fetched::ChainId(chain_id)) = fetched.first().cloned() else {
-            eyre::bail!("Cannot find fetched chain id");
-        };
-        cache.set_chain_id(chain_id);
-        let Some(Fetched::Block(block)) = fetched.get(1).cloned() else {
-            eyre::bail!("Cannot find stored block");
-        };
-        cache.prefetched(fetched);
-        block
-    } else {
-        let chain_id = rpc.chain_id().await?;
-        cache.set_chain_id(chain_id);
-        cache.save_fetched(Fetched::ChainId(chain_id), 0.0);
+    // `watch` processes strictly in order: block N+1 only after N, never
+    // skipping ahead to whatever the tip happens to be. `None` means
+    // nothing processed yet, in which case the first block is whatever's
+    // currently latest -- watch doesn't backfill all the way from genesis.
+    let mut last_processed: Option<u64> = None;
 
-        let block = rpc.block(block).await?;
-        cache.save_fetched(Fetched::Block(block.clone()), 0.0);
-        block
-    };
-
-    let head = block.head.clone();
-    println!("Begin: {} / {}", head.number.as_u64(), head.hash);
-    rpc.reset(head.number.as_u64() - 1, head.parent_hash);
-
-    let (rtx, mut rrx) = tokio::sync::mpsc::channel(4096);
-    let handle = tokio::spawn(async move {
-        if skip_check {
-            return;
-        }
-        let is_trace = std::env::var("TRACE").is_ok();
-        if is_trace {
-            println!("---\nSTREAMING OPENED");
-        }
-        let mut skip = 0;
-        loop {
-            let y = yrx.next().await;
-            let r = rrx.recv().await;
-            if let (Some(y_trace), Some(mut r)) = (y, r) {
-                let yevm_core::trace::Event::Step(mut y) = y_trace.event else {
-                    continue;
+    loop {
+        if watch {
+            // Poll once a second until the next sequential block is
+            // available, reusing the same `Rpc`/`RethDb` instead of
+            // reopening either -- this is the whole point of `watch`: the
+            // ~1s `RethDb::latest()` startup cost (see yevm-reth's module
+            // docs) is paid once for the process, not once per block.
+            let wait_start = Instant::now();
+            loop {
+                // `RethDb::pin` (below) checks the tip itself and refreshes
+                // as needed, but the readiness check here (`next <= head`)
+                // needs its own fresh read to know whether to wait at all
+                // -- `self.provider` is a single MDBX snapshot and doesn't
+                // see new blocks on its own no matter how it was opened
+                // (see `refresh_provider`'s docs).
+                #[cfg(feature = "reth")]
+                let head = if let Some(db) = &reth_db {
+                    db.refresh_provider()?;
+                    db.best_block_number()? + 1
+                } else {
+                    rpc = Rpc::latest(url.clone()).await?;
+                    rpc.block_number
                 };
-                if y != r {
-                    println!("===\nSTEP MISMATCH:\nYEVM: {y:#?}\nREVM: {r:#?}\n(skip: {skip})");
+                #[cfg(not(feature = "reth"))]
+                let head = {
+                    rpc = Rpc::latest(url.clone()).await?;
+                    rpc.block_number
+                };
+
+                let next = last_processed.map(|n| n + 1).unwrap_or(head);
+
+                if next <= head {
+                    let elapsed = wait_start.elapsed().as_secs_f64();
+                    if elapsed >= 1.0 {
+                        println!("\r(new block detected after {elapsed:.3} seconds)");
+                    }
+                    number = next;
                     break;
                 }
-                if is_trace {
-                    for line in r.debug.drain(..) {
-                        y.debug.push(format!("REVM: {line}"));
-                    }
-                    println!("{y:#?}");
-                }
-                skip += 1;
-            } else {
-                break;
+                print!(
+                    "\r(waiting for next block... {:.0}s)",
+                    wait_start.elapsed().as_secs_f64()
+                );
+                std::io::Write::flush(&mut std::io::stdout())?;
+                tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
             }
+            index = None;
         }
-        if is_trace {
-            println!("STREAMING CLOSED [{skip} items]\n---");
+
+        // Pins state to right before `number` -- `RethDb::pin` uses
+        // `factory.latest()` when it's the current tip + 1, or
+        // `history_by_block_number()` to reach a bit further back, as long
+        // as it's within the node's retained history
+        // (`account_history`/`storage_history` prune distance in
+        // `reth.toml`). No pre-check here: this either succeeds or its own
+        // error (via `?`) reports why `number` isn't reachable.
+        #[cfg(feature = "reth")]
+        if let Some(db) = &reth_db {
+            db.pin(number)?;
         }
-    });
+        let block_number = number;
 
-    let txs = block.txs.clone();
-    let pack = (txs.clone(), head.clone(), index, chain_id);
+        let (ytx, mut yrx) = mpsc::channel(4 * 1024 * 1024);
+        let filter = if !skip_check {
+            filter::STEP
+        } else {
+            filter::NONE
+        };
+        let mut cache = Cache::with_sender(ytx, filter);
 
-    let (revm_result_tx, mut revm_result_rx) = tokio::sync::mpsc::channel::<RevmResult>(1);
+        // TODO: make single-tx also replayable? just save all fetches to block:index.js
+        std::fs::create_dir_all("fetch")?;
+        let path = format!("fetch/{}.json", block_number);
+        let fetches = Path::new(&path);
+        let block = if !skip_cache && fetches.exists() && index.is_none() {
+            let file = File::open(fetches)?;
+            let mut reader = BufReader::new(file);
+            let mut content = String::new();
+            reader.read_to_string(&mut content)?;
+            let fetched: Vec<Fetched> = serde_json::from_str(&content)?;
+            let Some(Fetched::ChainId(chain_id)) = fetched.first().cloned() else {
+                eyre::bail!("Cannot find fetched chain id");
+            };
+            cache.set_chain_id(chain_id);
+            let Some(Fetched::Block(block)) = fetched.get(1).cloned() else {
+                eyre::bail!("Cannot find stored block");
+            };
+            cache.prefetched(fetched);
+            block
+        } else {
+            // Bootstrap fetch: one-off metadata, stays on RPC regardless of
+            // `--with-reth` -- not the per-account/storage cost that matters.
+            let chain_id = rpc.chain_id().await?;
+            cache.set_chain_id(chain_id);
+            cache.save_fetched(Fetched::ChainId(chain_id), 0.0);
 
-    let provider = ProviderBuilder::new().connect(&url).await?;
-    tokio::task::spawn_blocking(move || {
-        if skip_check {
-            return;
-        }
-        let (txs, head, index, network_chain_id) = pack;
-        if let Some(i) = index {
-            let tx = &txs[i];
-            let (call, tx) = (tx.call.clone().into(), tx.tx.clone());
-            if let Err(e) = live::run_one(
-                call,
-                tx,
-                head,
-                network_chain_id,
-                rtx,
-                revm_result_tx,
-                provider,
-            ) {
+            let block = rpc.block(block_number).await?;
+            cache.save_fetched(Fetched::Block(block.clone()), 0.0);
+            block
+        };
+
+        let head = block.head.clone();
+        // Only matters for `AnyChain::Rpc` (built below), which reads state at
+        // whatever block this pins -- must happen before `chain` borrows `rpc`.
+        rpc.reset(head.number.as_u64() - 1, head.parent_hash);
+
+        #[cfg(feature = "reth")]
+        let chain = match &reth_db {
+            Some(db) => AnyChain::Reth(db),
+            None => AnyChain::Rpc(&rpc),
+        };
+        #[cfg(not(feature = "reth"))]
+        let chain = AnyChain::Rpc(&rpc);
+
+        let backend = match &chain {
+            AnyChain::Rpc(_) => "rpc",
+            #[cfg(feature = "reth")]
+            AnyChain::Reth(_) => "reth",
+        };
+        println!(
+            "Begin: {} / {} [{backend}]",
+            head.number.as_u64(),
+            head.hash
+        );
+
+        let (rtx, mut rrx) = tokio::sync::mpsc::channel(4096);
+        let handle = tokio::spawn(async move {
+            if skip_check {
+                return;
+            }
+            let is_trace = std::env::var("TRACE").is_ok();
+            if is_trace {
+                println!("---\nSTREAMING OPENED");
+            }
+            let mut skip = 0;
+            loop {
+                let y = yrx.next().await;
+                let r = rrx.recv().await;
+                if let (Some(y_trace), Some(mut r)) = (y, r) {
+                    let yevm_core::trace::Event::Step(mut y) = y_trace.event else {
+                        continue;
+                    };
+                    if y != r {
+                        println!("===\nSTEP MISMATCH:\nYEVM: {y:#?}\nREVM: {r:#?}\n(skip: {skip})");
+                        break;
+                    }
+                    if is_trace {
+                        for line in r.debug.drain(..) {
+                            y.debug.push(format!("REVM: {line}"));
+                        }
+                        println!("{y:#?}");
+                    }
+                    skip += 1;
+                } else {
+                    break;
+                }
+            }
+            if is_trace {
+                println!("STREAMING CLOSED [{skip} items]\n---");
+            }
+        });
+
+        let txs = block.txs.clone();
+        let pack = (txs.clone(), head.clone(), index, chain_id);
+
+        let (revm_result_tx, mut revm_result_rx) = tokio::sync::mpsc::channel::<RevmResult>(1);
+
+        let provider = ProviderBuilder::new().connect(&url).await?;
+        tokio::task::spawn_blocking(move || {
+            if skip_check {
+                return;
+            }
+            let (txs, head, index, network_chain_id) = pack;
+            if let Some(i) = index {
+                let tx = &txs[i];
+                let (call, tx) = (tx.call.clone().into(), tx.tx.clone());
+                if let Err(e) = live::run_one(
+                    call,
+                    tx,
+                    head,
+                    network_chain_id,
+                    rtx,
+                    revm_result_tx,
+                    provider,
+                ) {
+                    eprintln!("REVM replay error (no trace steps): {e:#}");
+                }
+            } else if let Err(e) =
+                live::run_all(network_chain_id, &txs, head, rtx, revm_result_tx, provider)
+            {
                 eprintln!("REVM replay error (no trace steps): {e:#}");
             }
-        } else if let Err(e) =
-            live::run_all(network_chain_id, &txs, head, rtx, revm_result_tx, provider)
-        {
-            eprintln!("REVM replay error (no trace steps): {e:#}");
-        }
-    });
+        });
 
-    let txs = if let Some(i) = index {
-        vec![txs[i].clone()]
-    } else {
-        txs
-    };
-
-    pre_block(&head, &mut cache, &rpc).await?;
-
-    let n = txs.len();
-    let mut ok = 0;
-    let mut gas_total = 0;
-    let mut sec_total = 0.0;
-    let mut revm_drift: Vec<(Acc, Int)> = Vec::new();
-    for (i, tx) in txs.into_iter().enumerate() {
-        if std::env::var("TRACE").is_ok() {
-            println!("{}", serde_json::to_string_pretty(&tx).unwrap());
-        }
-
-        let hash = tx.tx.hash;
-        let sender = tx.call.from;
-        let (tx, call) = (tx.tx.clone(), tx.call.into());
-        let mut exe = Executor::new(call);
-        cache.reset();
-
-        let now = Instant::now();
-        let result = exe.run(tx, head.clone(), &mut cache, &rpc).await?;
-        let ms = now.elapsed().as_micros() as f64 / 1000.0;
-
-        let gas = result.gas().finalized;
-        let (fetches, fetching) = cache.fetch_stats();
-
-        let stats = if fetches > 0 {
-            format!("{ms:5.3}ms/{:5.3}ms, F:{fetches}/{fetching:5.3}ms", ms - fetching)
+        let txs = if let Some(i) = index {
+            vec![txs[i].clone()]
         } else {
-            format!("{ms:5.3}ms")
+            txs
         };
 
-        if skip_check {
-            ok += 1;
-            gas_total += gas;
-            sec_total += ms - fetching;
-            println!("{hash}: [{}/{n}, {gas} gas, {stats}]", i + 1);
-            continue;
-        }
+        pre_block(&head, &mut cache, &chain).await?;
 
-        let receipt = rpc.receipt(hash).await?;
-        let ty = receipt.r#type.as_u8();
-        let Some(RevmResult {
-            call: revm_call,
-            state: revm_state,
-            millis,
-        }) = revm_result_rx.recv().await
-        else {
-            eyre::bail!("revm result unavailable");
-        };
-        let stats = stats + &format!(", R:{millis:5.3}ms");
+        let n = txs.len();
+        let mut ok = 0;
+        let mut gas_total = 0;
+        let mut sec_total = 0.0;
+        let mut revm_drift: Vec<(Acc, Int)> = Vec::new();
+        for (i, tx) in txs.into_iter().enumerate() {
+            if std::env::var("TRACE").is_ok() {
+                println!("{}", serde_json::to_string_pretty(&tx).unwrap());
+            }
 
-        let (mut violations, revm_gas_ok) = check_result(result, receipt, Some(revm_call));
-        let skip_value = if revm_gas_ok {
-            vec![]
-        } else {
-            vec![sender, head.coinbase]
-        };
-        let new_drift = check_state(
-            revm_state,
-            &mut cache,
-            &mut violations,
-            &skip_value,
-            &revm_drift,
-        );
-        revm_drift.extend(new_drift);
+            let hash = tx.tx.hash;
+            let sender = tx.call.from;
+            let (tx, call) = (tx.tx.clone(), tx.call.into());
+            let mut exe = Executor::new(call);
+            cache.reset();
 
-        if violations.is_empty() {
-            gas_total += gas;
-            sec_total += ms - fetching;
-            println!("{hash} [type:{ty}]: OK [{}/{n}, {gas} gas, {stats}]", i + 1);
-            ok += 1;
-        } else {
-            println!(
-                "{hash} [type:{ty}]: FAIL={}:{} [{}/{n}, {stats}]\n{}",
-                head.number.as_u64(),
-                index.unwrap_or(i),
-                i + 1,
-                violations.join("\n")
+            let now = Instant::now();
+            let result = exe.run(tx, head.clone(), &mut cache, &chain).await?;
+            let ms = now.elapsed().as_micros() as f64 / 1000.0;
+
+            let gas = result.gas().finalized;
+            let (fetches, fetching) = cache.fetch_stats();
+
+            let stats = if fetches > 0 {
+                format!(
+                    "{ms:5.3}ms/{:5.3}ms, F:{fetches}/{fetching:5.3}ms",
+                    ms - fetching
+                )
+            } else {
+                format!("{ms:5.3}ms")
+            };
+
+            if skip_check {
+                ok += 1;
+                gas_total += gas;
+                sec_total += ms - fetching;
+                if !skip_stats {
+                    println!("{hash}: [{}/{n}, {gas} gas, {stats}]", i + 1);
+                }
+                continue;
+            }
+
+            let receipt = rpc.receipt(hash).await?;
+            let ty = receipt.r#type.as_u8();
+            let Some(RevmResult {
+                call: revm_call,
+                state: revm_state,
+                millis,
+            }) = revm_result_rx.recv().await
+            else {
+                eyre::bail!("revm result unavailable");
+            };
+            let stats = stats + &format!(", R:{millis:5.3}ms");
+
+            let (mut violations, revm_gas_ok) = check_result(result, receipt, Some(revm_call));
+            let skip_value = if revm_gas_ok {
+                vec![]
+            } else {
+                vec![sender, head.coinbase]
+            };
+            let new_drift = check_state(
+                revm_state,
+                &mut cache,
+                &mut violations,
+                &skip_value,
+                &revm_drift,
             );
+            revm_drift.extend(new_drift);
+
+            if violations.is_empty() {
+                gas_total += gas;
+                sec_total += ms - fetching;
+                if !skip_stats {
+                    println!("{hash} [type:{ty}]: OK [{}/{n}, {gas} gas, {stats}]", i + 1);
+                }
+                ok += 1;
+            } else {
+                println!(
+                    "{hash} [type:{ty}]: FAIL={}:{} [{}/{n}, {stats}]\n{}",
+                    head.number.as_u64(),
+                    index.unwrap_or(i),
+                    i + 1,
+                    violations.join("\n")
+                );
+            }
         }
-    }
 
-    if !skip_cache && !fetches.exists() && index.is_none() {
-        let fetched = std::mem::take(&mut cache.fetched);
-        let file = File::create(fetches)?;
-        let mut writer = BufWriter::new(file);
-        let content = serde_json::to_vec(&fetched)?;
-        writer.write_all(&content)?;
-    }
+        if !skip_cache && !fetches.exists() && index.is_none() {
+            let fetched = std::mem::take(&mut cache.fetched);
+            let file = File::create(fetches)?;
+            let mut writer = BufWriter::new(file);
+            let content = serde_json::to_vec(&fetched)?;
+            writer.write_all(&content)?;
+        }
 
-    let ok = if n > 1 {
-        format!("Block: {}, {ok}/{n} OK", head.number.as_u64())
-    } else {
-        String::new()
-    };
-    let stat = if gas_total > 0 && sec_total > 0.0 {
-        format!(
-            "{gas_total} gas, {sec_total:5.3}ms: ~{:.2} gas/sec",
-            gas_total as f64 * 1000.0 / sec_total as f64
-        )
-    } else {
-        String::new()
-    };
-    if !ok.is_empty() {
-        println!("{ok}, {stat}");
-    }
+        let ok = if n > 1 {
+            format!("Block: {}, {ok}/{n} OK", head.number.as_u64())
+        } else {
+            String::new()
+        };
+        let stat = if gas_total > 0 && sec_total > 0.0 {
+            format!(
+                "{gas_total} gas, {sec_total:5.3}ms: ~{:.2} gas/sec",
+                gas_total as f64 * 1000.0 / sec_total as f64
+            )
+        } else {
+            String::new()
+        };
+        if !ok.is_empty() {
+            println!("{ok}, {stat}");
+        }
 
-    let _ = cache.sender.take();
-    handle.await?;
+        let _ = cache.sender.take();
+        handle.await?;
+
+        last_processed = Some(number);
+        if !watch {
+            break;
+        }
+    } // loop
+
     Ok(())
 }
 
@@ -899,7 +1153,7 @@ mod live {
             ..Tracer::default()
         };
         let mut evm = ctx.build_mainnet_with_inspector(inspector);
-        
+
         let ms = std::time::Instant::now();
         let ExecResultAndState { result, state } = evm.inspect_tx(tx_env)?;
         let ms = ms.elapsed().as_micros() as f64 / 1_000.0;
