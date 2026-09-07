@@ -248,7 +248,8 @@ impl State for Cache {
         // EIP-7702 delegation designator: 0xef0100 || address (20 bytes)
         code[..3].copy_from_slice(&[0xEF, 0x01, 0x00]);
         code[3..].copy_from_slice(dst.as_ref());
-        self.set_code(src, code.into(), Int::ZERO);
+        let hash = Int::from(yevm_misc::keccak256(&code).as_ref());
+        self.set_code(src, code.into(), hash);
     }
 
     fn merge(&mut self, acc: &Acc, chain: Account) {

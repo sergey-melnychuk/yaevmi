@@ -359,16 +359,16 @@ pub fn blobhash(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmR
 
 pub fn blobbasefee(evm: &mut Evm, _: &Context, _: &Call, _: &mut dyn State) -> EvmResult<()> {
     evm.gas_charge(2)?;
-    // TODO: proper blob handling
-    // context: 0xd6859d613c7ffcfb371ec3c3eebc8ad37dc9480df0e6a304c80864b104d6c962/24935686:49
-    // excess = 0x0da161cb must lead to blob_base_fee = 0x12d4542f (source: chain state)
-    // yet it does not fit `fake_exponent` calculations described in the spec!
-
-    // let fee = evm.head.excess_blob_gas.map_or(Int::ZERO, |excess| {
-    //     crate::call::blob_base_fee(evm.head.number.as_u64(), excess)
-    // });
-    // evm.push(fee)?;
-
-    evm.push(Int::ONE)?;
+    // See `crate::call::blob_base_fee`'s own doc comment: the update
+    // fraction is fork-scheduled (EIP-7892 BPO forks), not a fixed
+    // constant. The old attempt here ("does not fit `fake_exponent`")
+    // almost certainly used Prague's fraction (5_007_716) against a block
+    // already on BPO1/BPO2 -- hardcoded here to BPO2's value (11_684_671),
+    // matching the same hardcode used for the fee deduction in `exe.rs`.
+    let fee = evm
+        .head
+        .excess_blob_gas
+        .map_or(Int::ONE, |excess| Int::from(crate::call::blob_base_fee(excess.as_u64())));
+    evm.push(fee)?;
     Ok(())
 }

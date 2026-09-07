@@ -976,11 +976,15 @@ mod live {
         ctx.block.basefee = head.base_fee.as_u64();
         ctx.block.prevrandao = Some(to_b256(&head.prevrandao));
         ctx.cfg.chain_id = chain_id;
-        // TODO: proper blob handling
-        // if let Some(excess) = head.excess_blob_gas {
-        //     let fraction = if head.number.as_u64() >= 22_431_084 { 5_007_716u64 } else { 3_338_477u64 };
-        //     ctx.block.set_blob_excess_gas_and_price(excess.as_u64(), fraction);
-        // }
+        // Update fraction is fork-scheduled (EIP-7892 BPO forks bump it),
+        // not a fixed protocol constant -- hardcoded here to BPO2's value
+        // (11_684_671), matching yevm_core::call::blob_base_fee's own
+        // hardcode. Correct for blocks mined under BPO2, wrong again once
+        // the next BPO fork lands.
+        if let Some(excess) = head.excess_blob_gas {
+            let fraction = 11_684_671u64;
+            ctx.block.set_blob_excess_gas_and_price(excess.as_u64(), fraction);
+        }
 
         // let fork = revm::primitives::hardfork::SpecId::OSAKA;
         // ctx.cfg.set_spec_and_mainnet_gas_params(fork);

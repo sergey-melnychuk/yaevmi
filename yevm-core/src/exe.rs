@@ -21,20 +21,42 @@ const MAX_CALL_DEPTH: usize = 1024;
 const BEACON_ROOTS: Acc = yevm_base::acc::acc("0x000f3df6d732807ef1319fb7b8bb8522d0beac02");
 const HISTORY_BUFFER_LENGTH: u64 = 8191;
 
+// EIP-2935 (Prague): history-storage contract + its ring-buffer window.
+// Not fork-timestamp-gated below (yevm has no chain-config/fork-schedule
+// awareness) -- applied unconditionally on every block, which is correct
+// for current/recent mainnet blocks (well past Prague) but WOULD be wrong
+// if this were ever used to replay a genuinely pre-Prague block.
+const HISTORY_STORAGE: Acc = yevm_base::acc::acc("0x0000F90827F1C53a10cb7A02335B175320002935");
+const HISTORY_SERVE_WINDOW: u64 = 8191;
+
 /// EIP-4788: write the parent beacon block root into the ring buffer before executing transactions.
+/// EIP-2935: write the parent block's hash into the history-storage contract, same timing.
 pub async fn pre_block(head: &Head, state: &mut impl State, chain: &impl Chain) -> Result<()> {
-    let Some(root) = head.parent_beacon_block_root else {
-        return Ok(());
-    };
-    fetch(Fetch::Account(BEACON_ROOTS), state, chain).await?;
-    let timestamp = head.timestamp.as_u64();
-    let slot = timestamp % HISTORY_BUFFER_LENGTH;
-    state.init(&BEACON_ROOTS, &Int::from(slot), Int::from(timestamp));
-    state.init(
-        &BEACON_ROOTS,
-        &Int::from(slot + HISTORY_BUFFER_LENGTH),
-        root,
-    );
+    if let Some(root) = head.parent_beacon_block_root {
+        fetch(Fetch::Account(BEACON_ROOTS), state, chain).await?;
+        let timestamp = head.timestamp.as_u64();
+        let slot = timestamp % HISTORY_BUFFER_LENGTH;
+        let slot2 = slot + HISTORY_BUFFER_LENGTH;
+
+        // `put` (not `init`) so this real write emits a Trace event -- `init`
+        // is for "populate a freshly-fetched slot with its real value" (no
+        // diff), and this genuinely changes state every block. Fetch each
+        // cell first so `put`'s recorded previous value is the real
+        // on-chain one (the ring buffer reuses slots every ~8191 seconds,
+        // so it's rarely zero), not `put`'s own cold-slot default.
+        fetch(Fetch::StateCell(BEACON_ROOTS, Int::from(slot)), state, chain).await?;
+        state.put(&BEACON_ROOTS, &Int::from(slot), Int::from(timestamp));
+        fetch(Fetch::StateCell(BEACON_ROOTS, Int::from(slot2)), state, chain).await?;
+        state.put(&BEACON_ROOTS, &Int::from(slot2), root);
+    }
+
+    if let Some(number) = head.number.as_u64().checked_sub(1) {
+        fetch(Fetch::Account(HISTORY_STORAGE), state, chain).await?;
+        let slot = number % HISTORY_SERVE_WINDOW;
+        fetch(Fetch::StateCell(HISTORY_STORAGE, Int::from(slot)), state, chain).await?;
+        state.put(&HISTORY_STORAGE, &Int::from(slot), head.parent_hash);
+    }
+
     Ok(())
 }
 const MAX_STEPS: u64 = 10_000_000;
@@ -189,11 +211,10 @@ pub fn intrinsic(
 
     // EIP-4844: blob gas cost = num_blobs × GAS_PER_BLOB × actual_blob_base_fee (never refunded).
     const GAS_PER_BLOB: u64 = 0x20000;
-    let blob_gas_cost = if let Some(_excess) = head.excess_blob_gas {
-        // TODO: proper blob handling
-        // let fee = crate::call::blob_base_fee(head.number.as_u64(), excess);
-        // mul([Int::from(tx.blob_versioned_hashes.len() as u64 * GAS_PER_BLOB), fee])
-        Int::from(tx.blob_versioned_hashes.len() as u64 * GAS_PER_BLOB)
+    let blob_gas_cost = if let Some(excess) = head.excess_blob_gas {
+        let fee = crate::call::blob_base_fee(excess.as_u64());
+        let blob_gas = tx.blob_versioned_hashes.len() as u64 * GAS_PER_BLOB;
+        Int::from(blob_gas as u128 * fee)
     } else {
         Int::ZERO
     };

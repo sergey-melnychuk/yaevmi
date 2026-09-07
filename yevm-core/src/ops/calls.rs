@@ -70,7 +70,7 @@ pub fn call<S: State>(evm: &mut Evm, ctx: &Context, _: &Call, state: &mut S) -> 
         return Err(EvmYield::Fetch(Fetch::Account(address)));
     }
     if let Some(delegate) = state.auth(&address)
-        && state.acc(&address).is_none()
+        && state.acc(&delegate).is_none()
     {
         return Err(EvmYield::Fetch(Fetch::Account(delegate)));
     }
@@ -169,7 +169,7 @@ pub fn callcode<S: State>(evm: &mut Evm, ctx: &Context, _: &Call, state: &mut S)
         return Err(EvmYield::Fetch(Fetch::Account(address)));
     };
     if let Some(delegate) = state.auth(&address)
-        && state.acc(&address).is_none()
+        && state.acc(&delegate).is_none()
     {
         return Err(EvmYield::Fetch(Fetch::Account(delegate)));
     }
@@ -259,7 +259,7 @@ pub fn delegatecall<S: State>(
         return Err(EvmYield::Fetch(Fetch::Account(address)));
     };
     if let Some(delegate) = state.auth(&address)
-        && state.acc(&address).is_none()
+        && state.acc(&delegate).is_none()
     {
         return Err(EvmYield::Fetch(Fetch::Account(delegate)));
     }
@@ -363,7 +363,7 @@ pub fn staticcall<S: State>(
         return Err(EvmYield::Fetch(Fetch::Account(address)));
     };
     if let Some(delegate) = state.auth(&address)
-        && state.acc(&address).is_none()
+        && state.acc(&delegate).is_none()
     {
         return Err(EvmYield::Fetch(Fetch::Account(delegate)));
     }

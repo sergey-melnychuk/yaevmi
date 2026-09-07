@@ -254,23 +254,28 @@ pub struct Logged {
     pub transaction_index: Int,
 }
 
-// TODO: proper blob handling
-/*
-/// EIP-4844 BLOBBASEFEE calculation (fake_exponential)
+/// EIP-4844 BLOBBASEFEE calculation (fake_exponential).
 /// (see: https://eips.ethereum.org/EIPS/eip-4844)
+///
+/// `d` (the update fraction) is NOT a fixed protocol constant -- it's
+/// fork-scheduled (EIP-7892 "blob parameter only" forks bump it alongside
+/// the target/max blob count): 3_338_477 at Cancun, 5_007_716 from Prague
+/// through Osaka, 8_346_193 at BPO1, 11_684_671 at BPO2. Hardcoded here to
+/// BPO2's value -- correct for blocks mined under BPO2, wrong again once
+/// the next BPO fork lands. Verified against a real mainnet block's
+/// reported `blobGasPrice` (see mpt-lab's PTRIE.md / block.rs experiment).
 pub fn blob_base_fee(excess_blob_gas: u64) -> u128 {
-    let d = 5_007_716u128;
+    let d = 11_684_671u128;
     let mut i = 1u64;
     let mut out = 0;
     let mut acc = d;
     while acc > 0 {
         out += acc;
-        acc = (acc * excess_blob_gas) / (d * i);
+        acc = (acc * excess_blob_gas as u128) / (d * i as u128);
         i += 1;
     }
     out / d
 }
-*/
 
 #[cfg(test)]
 mod tests {
