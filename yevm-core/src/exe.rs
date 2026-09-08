@@ -59,6 +59,107 @@ pub async fn pre_block(head: &Head, state: &mut impl State, chain: &impl Chain) 
 
     Ok(())
 }
+
+const WITHDRAWAL_REQUEST: Acc = yevm_base::acc::acc("0x00000961Ef480Eb55e80D19ad83579A64c007002");
+const CONSOLIDATION_REQUEST: Acc = yevm_base::acc::acc("0x0000BBdDc7CE488642fb579F8B00f3a590007251");
+
+const REQUEST_QUEUE_EXCESS_SLOT: u64 = 0;
+const REQUEST_QUEUE_COUNT_SLOT: u64 = 1;
+const REQUEST_QUEUE_HEAD_SLOT: u64 = 2;
+const REQUEST_QUEUE_TAIL_SLOT: u64 = 3;
+
+/// EIP-7002 (withdrawal requests) / EIP-7251 (consolidation requests): at the end of
+/// every block, each predeploy dequeues up to its per-block max, updates its excess-fee
+/// counter, and resets its per-block count -- unconditionally, even on blocks where no
+/// tx touched it. The "add request" side (a tx CALLing the predeploy with calldata +
+/// fee) already works correctly since it's just ordinary contract bytecode executed via
+/// the normal CALL path; only this block-end dequeue step was missing entirely. Direct
+/// transliteration of the EIPs' own `dequeue_*_requests` / `update_excess_*_requests` /
+/// `reset_*_requests_count` reference pseudocode. The SSZ-encoded request list itself
+/// (used for the block's requestsHash) is not needed here -- only the storage side
+/// effects matter for state-root purposes.
+/// Not fork-timestamp-gated, same rationale as EIP-2935 above.
+pub async fn post_block(state: &mut impl State, chain: &impl Chain) -> Result<()> {
+    process_request_queue(WITHDRAWAL_REQUEST, 16, 2, state, chain).await?;
+    process_request_queue(CONSOLIDATION_REQUEST, 2, 1, state, chain).await?;
+    Ok(())
+}
+
+async fn process_request_queue(
+    addr: Acc,
+    max_per_block: u64,
+    target_per_block: u64,
+    state: &mut impl State,
+    chain: &impl Chain,
+) -> Result<()> {
+    // Guard every fetch on "not already in cache" -- `fetch` unconditionally
+    // overwrites via `State::merge`/`init`, which would silently clobber any
+    // local mutation an earlier tx in this same block already made (this
+    // predeploy may well have been touched by a tx before this runs, since
+    // post_block executes after the whole tx loop, unlike pre_block).
+    if state.acc(&addr).is_none() {
+        fetch(Fetch::Account(addr), state, chain).await?;
+    }
+    if state.code(&addr).map(|(c, _)| c.0.is_empty()).unwrap_or(true) {
+        // Predeploy not yet in state (pre-activation replay) -- nothing to do.
+        return Ok(());
+    }
+
+    for slot in [
+        REQUEST_QUEUE_EXCESS_SLOT,
+        REQUEST_QUEUE_COUNT_SLOT,
+        REQUEST_QUEUE_HEAD_SLOT,
+        REQUEST_QUEUE_TAIL_SLOT,
+    ] {
+        if state.get(&addr, &Int::from(slot)).is_none() {
+            fetch(Fetch::StateCell(addr, Int::from(slot)), state, chain).await?;
+        }
+    }
+
+    let excess = state
+        .get(&addr, &Int::from(REQUEST_QUEUE_EXCESS_SLOT))
+        .map(|(cur, _)| cur)
+        .unwrap_or_default();
+    let count = state
+        .get(&addr, &Int::from(REQUEST_QUEUE_COUNT_SLOT))
+        .map(|(cur, _)| cur)
+        .unwrap_or_default()
+        .as_u64();
+    let head = state
+        .get(&addr, &Int::from(REQUEST_QUEUE_HEAD_SLOT))
+        .map(|(cur, _)| cur)
+        .unwrap_or_default()
+        .as_u64();
+    let tail = state
+        .get(&addr, &Int::from(REQUEST_QUEUE_TAIL_SLOT))
+        .map(|(cur, _)| cur)
+        .unwrap_or_default()
+        .as_u64();
+
+    let num_in_queue = tail.saturating_sub(head);
+    let num_dequeued = num_in_queue.min(max_per_block);
+    let new_head = head + num_dequeued;
+    if new_head == tail {
+        state.put(&addr, &Int::from(REQUEST_QUEUE_HEAD_SLOT), Int::ZERO);
+        state.put(&addr, &Int::from(REQUEST_QUEUE_TAIL_SLOT), Int::ZERO);
+    } else {
+        state.put(&addr, &Int::from(REQUEST_QUEUE_HEAD_SLOT), Int::from(new_head));
+    }
+
+    // EXCESS_INHIBITOR (2**256-1) marks pre-activation state; treat it as 0.
+    let previous_excess = if excess == Int::MAX { 0 } else { excess.as_u64() };
+    let new_excess = (previous_excess + count).saturating_sub(target_per_block);
+    state.put(
+        &addr,
+        &Int::from(REQUEST_QUEUE_EXCESS_SLOT),
+        Int::from(new_excess),
+    );
+
+    state.put(&addr, &Int::from(REQUEST_QUEUE_COUNT_SLOT), Int::ZERO);
+
+    Ok(())
+}
+
 const MAX_STEPS: u64 = 10_000_000;
 const MAX_CODE_SIZE: usize = 24_576;
 const CODE_DEPOSIT_GAS: i64 = 200;
